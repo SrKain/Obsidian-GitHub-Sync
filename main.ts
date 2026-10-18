@@ -1,9 +1,6 @@
 import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, Vault } from 'obsidian';
-import { simpleGit, SimpleGit, CleanOptions, SimpleGitOptions } from 'simple-git';
+import { simpleGit, SimpleGitOptions } from 'simple-git';
 import { setIntervalAsync, clearIntervalAsync } from 'set-interval-async';
-
-let simpleGitOptions: Partial<SimpleGitOptions>;
-let git: SimpleGit;
 
 type NoticeLevelSetting = 'ALL' | 'WARNING' | 'ERROR';
 type LegacyNoticeLevelSetting = NoticeLevelSetting | 'WARNINGS';
@@ -34,6 +31,7 @@ const DEFAULT_SETTINGS: GHSyncSettings = {
 export default class GHSyncPlugin extends Plugin {
 
 	settings: GHSyncSettings;
+	private syncInProgress = false;
 
 	private shouldShowNotice(severity: NoticeSeverity): boolean {
 		switch (this.settings.noticeLevel) {
@@ -66,16 +64,27 @@ export default class GHSyncPlugin extends Plugin {
 
 	async SyncNotes()
 	{
-		const remote = this.settings.remoteURL.trim();
+		if (this.syncInProgress) {
+			this.showNotice('GitHub Sync: synchronization already in progress.', 'WARNING');
+			return;
+		}
 
-		simpleGitOptions = {
+		this.syncInProgress = true;
+		try {
+		const remote = this.settings.remoteURL.trim();
+		if (!remote) {
+			this.showNotice('GitHub Sync: configure a remote URL before syncing.', 'ERROR');
+			return;
+		}
+
+		const simpleGitOptions: Partial<SimpleGitOptions> = {
 			//@ts-ignore
 		    baseDir: this.app.vault.adapter.getBasePath(),
 		    binary: this.settings.gitLocation + "git",
 		    maxConcurrentProcesses: 6,
 		    trimmed: false,
 		};
-		git = simpleGit(simpleGitOptions);
+		const git = simpleGit(simpleGitOptions);
 
 		let os = require("os");
 		let hostname = os.hostname();
@@ -85,6 +94,11 @@ export default class GHSyncPlugin extends Plugin {
 			return; })
 
 		if (!statusResult) {
+			return;
+		}
+
+		if (statusResult.conflicted.length > 0) {
+			this.showNotice('GitHub Sync: resolve existing merge conflicts before syncing.', 'WARNING', 10000);
 			return;
 		}
 
@@ -107,12 +121,16 @@ export default class GHSyncPlugin extends Plugin {
 		    }
 		}
 
-		// configure remote
+		// Preserve the existing origin when it already points to the configured remote.
 		try {
-			await git.removeRemote('origin').catch((e) => { this.showNotice(e, 'ERROR', 10000); });
-			await git.addRemote('origin', remote).catch((e) => { this.showNotice(e, 'ERROR', 10000); });
-		}
-		catch (e) {
+			const remotes = await git.getRemotes(true);
+			const origin = remotes.find((entry) => entry.name === 'origin');
+			if (!origin) {
+				await git.addRemote('origin', remote);
+			} else if (origin.refs.fetch !== remote || origin.refs.push !== remote) {
+				await git.remote(['set-url', 'origin', remote]);
+			}
+		} catch (e) {
 			this.showNotice(e, 'ERROR', 10000);
 			return;
 		}
@@ -126,21 +144,23 @@ export default class GHSyncPlugin extends Plugin {
 
 		// git pull origin main
 	    try {
-	    	//@ts-ignore
-	    	await git.pull('origin', 'main', { '--no-rebase': null }, (err, update) => {
-	   		})
+	    	await git.pull('origin', 'main', { '--no-rebase': null });
 	    } catch (e) {
 	    	let conflictStatus = await git.status().catch((error) => { this.showNotice(error, 'ERROR', 10000); return; });
 	    	if (!conflictStatus) {
 	    		return;
 	    	}
+			if (conflictStatus.conflicted.length === 0) {
+				this.showNotice(e, 'ERROR', 10000);
+				return;
+			}
     		let conflictMsg = "Merge conflicts in:";
 	    	//@ts-ignore
 			for (let c of conflictStatus.conflicted)
 			{
 				conflictMsg += "\n\t"+c;
 			}
-			conflictMsg += "\nResolve them or click sync button again to push with unresolved conflicts."
+			conflictMsg += "\nResolve the conflicts in these files, then sync again."
 			this.showNotice(conflictMsg, 'WARNING');
 			//@ts-ignore	
 			for (let c of conflictStatus.conflicted)
@@ -150,32 +170,38 @@ export default class GHSyncPlugin extends Plugin {
 	    	return;
 	    }
 
-		// resolve merge conflicts
-		// git push origin main
-	    if (!clean) {
-		    try {
-		    	await git.push('origin', 'main', ['-u']);
-		    } catch (e) {
-		    	this.showNotice(e, 'ERROR', 10000);
-		    	return;
+		// Push even if the vault was initially clean: local commits or a merge
+		// performed by pull may still need to be sent to origin.
+		try {
+			const finalStatus = await git.status();
+			if (finalStatus.conflicted.length > 0) {
+				this.showNotice('GitHub Sync: merge conflicts must be resolved before pushing.', 'WARNING', 10000);
+				return;
 			}
-	    }
+			await git.push('origin', 'main', ['-u']);
+		} catch (e) {
+			this.showNotice(e, 'ERROR', 10000);
+			return;
+		}
 
 		this.showSyncSuccessNotice();
+		} finally {
+			this.syncInProgress = false;
+		}
 	}
 
 	async CheckStatusOnStart()
 	{
 		// check status
 		try {
-			simpleGitOptions = {
+			const simpleGitOptions: Partial<SimpleGitOptions> = {
 				//@ts-ignore
 			    baseDir: this.app.vault.adapter.getBasePath(),
 			    binary: this.settings.gitLocation + "git",
 			    maxConcurrentProcesses: 6,
 			    trimmed: false,
 			};
-			git = simpleGit(simpleGitOptions);
+			const git = simpleGit(simpleGitOptions);
 
 			//check for remote changes
 			// git branch --set-upstream-to=origin/main main
