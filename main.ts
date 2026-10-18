@@ -98,7 +98,7 @@ export default class GHSyncPlugin extends Plugin {
 		}
 
 		if (statusResult.conflicted.length > 0) {
-			this.showNotice('GitHub Sync: resolve existing merge conflicts before syncing.', 'WARNING', 10000);
+			this.showNotice('GitHub Sync: resolve and stage existing merge conflicts before syncing.', 'WARNING', 10000);
 			return;
 		}
 
@@ -127,8 +127,13 @@ export default class GHSyncPlugin extends Plugin {
 			const origin = remotes.find((entry) => entry.name === 'origin');
 			if (!origin) {
 				await git.addRemote('origin', remote);
-			} else if (origin.refs.fetch !== remote || origin.refs.push !== remote) {
-				await git.remote(['set-url', 'origin', remote]);
+			} else {
+				if (origin.refs.fetch !== remote) {
+					await git.remote(['set-url', 'origin', remote]);
+				}
+				if (origin.refs.push !== remote) {
+					await git.remote(['set-url', '--push', 'origin', remote]);
+				}
 			}
 		} catch (e) {
 			this.showNotice(e, 'ERROR', 10000);
@@ -160,7 +165,7 @@ export default class GHSyncPlugin extends Plugin {
 			{
 				conflictMsg += "\n\t"+c;
 			}
-			conflictMsg += "\nResolve the conflicts in these files, then sync again."
+			conflictMsg += "\nResolve and stage these files with git add, then sync again."
 			this.showNotice(conflictMsg, 'WARNING');
 			//@ts-ignore	
 			for (let c of conflictStatus.conflicted)
