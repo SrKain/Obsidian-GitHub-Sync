@@ -27,7 +27,9 @@ Simple plugin that allows you to sync your vault to a personal GitHub repo for *
 
 ## How to Use
 Click the **Sync with Remote** ribbon icon to pull changes from your GitHub repo and push local changes. 
-If there are any conflicts, the unmerged files will be opened for you to resolve (or just push again with the unresolved conflicts - that should work too).
+If there are merge conflicts, the plugin opens the affected files and stops the sync. Resolve each conflict and stage the resolved files with `git add <path>` (or through another Git client) before syncing again. Do not push unresolved conflict markers.
+
+The plugin also pushes existing local commits when the working tree is clean. If a sync is already running, a second request is skipped to avoid overlapping Git operations.
 
 ## Setup
 
