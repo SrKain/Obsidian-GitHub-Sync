@@ -43,6 +43,8 @@ const git=(dir,...args)=>execFileSync('git',['-C',dir,...args],{encoding:'utf8'}
     assert.equal(git(vault,'ls-files','--',secretPath).trim(),'','do not commit private config');
     assert.equal(run('--git-dir',bare,'show','main:note.md'),'from desktop\n','push note update');
 
+    // Locally ignore the sensitive settings for a clean-worktree scenario.
+    await fsp.appendFile(path.join(vault,'.git','info','exclude'),'\n/.obsidian/plugins/github-sync/data.json\n');
     // A clean worktree may still contain commits that need pushing.
     await fsp.writeFile(path.join(vault,'another.md'),'pending committed note\n');
     git(vault,'add','another.md');git(vault,'commit','-m','local pending');
