@@ -55,6 +55,33 @@ export function classifySyncError(error: unknown): SyncErrorKind {
 /** Never print full remote URLs, authorization headers or raw errors containing tokens. */
 export function publicErrorMessage(error: unknown): string {
   const kind = classifySyncError(error);
+  const detail = String(error instanceof Error ? error.message : error).toLowerCase();
+  // These are fixed guidance strings, never forwarded input from Git, GitHub,
+  // command-line output, or an untrusted URL.
+  if (detail.includes('tracking plugin') || detail.includes('contains plugin data.json')) {
+    return 'Your vault is tracking GitHub Sync data.json. Remove it from Git tracking and rotate previously exposed credentials.';
+  }
+  if (detail.includes('origin') && (detail.includes('differs') || detail.includes('does not match'))) {
+    return 'The vault repository differs from the configured GitHub address. Verify both before syncing.';
+  }
+  if (detail.includes('not a git repository') || detail.includes('git is unavailable')) {
+    return 'This vault has no usable Git repository. Initialize it or connect an existing cloned vault.';
+  }
+  if (detail.includes('branch is not main') || detail.includes('only the main branch')) {
+    return 'Your vault is not on the main branch. Select or create main on desktop before syncing.';
+  }
+  if (detail.includes('selected secret is unavailable')) {
+    return 'The saved GitHub token is unavailable on this device. Select a valid token in Obsidian settings.';
+  }
+  if (detail.includes('configure your github repository')) {
+    return 'Enter your repository URL in the GitHub Sync settings.';
+  }
+  if (detail.includes('remove credentials') || detail.includes('query parameters')) {
+    return 'The repository URL includes credentials or extra parameters. Remove them and use SecretStorage for tokens.';
+  }
+  if (detail.includes('repository url') || detail.includes('clone url') || detail.includes('github https')) {
+    return 'Check the repository URL. Use https://github.com/owner/repo.git on mobile.';
+  }
   switch (kind) {
     case 'auth': return 'GitHub authentication failed. Check the selected token and reconnect.';
     case 'permission': return 'GitHub rejected this operation. Check repository write permissions and branch protection.';
