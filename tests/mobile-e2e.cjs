@@ -147,6 +147,7 @@ Module._load=function(id,parent,isMain){
     };
     const app={vault:makeVault(mobileDir),secretStorage:{getSecret:()=>null}};
     const mobile=new MobileSync(app,()=>settings);
+    await mobile.verifyConnection();
     await mobile.sync();
     assert.equal(fs.readFileSync(path.join(mobileDir,'notes.md'),'utf8'),'Remote initial note\n','initial checkout works');
 
