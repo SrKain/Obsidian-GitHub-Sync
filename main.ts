@@ -1,6 +1,6 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, Vault } from 'obsidian';
-import { simpleGit, SimpleGitOptions } from 'simple-git';
-import { setIntervalAsync, clearIntervalAsync } from 'set-interval-async';
+import { App, Notice, Platform, Plugin, PluginSettingTab, SecretComponent, Setting } from 'obsidian';
+import type { SimpleGitOptions } from 'simple-git';
+import type { MobileSync } from './src/mobile/MobileSync';
 
 type NoticeLevelSetting = 'ALL' | 'WARNING' | 'ERROR';
 type LegacyNoticeLevelSetting = NoticeLevelSetting | 'WARNINGS';
@@ -15,6 +15,9 @@ interface GHSyncSettings {
 	checkStatusOnLoad: boolean;
 	noticeLevel: NoticeLevelSetting;
 	showSyncSuccessNotice: boolean;
+	mobileTokenKey: string;
+	mobileAuthorName: string;
+	mobileAuthorEmail: string;
 }
 
 const DEFAULT_SETTINGS: GHSyncSettings = {
@@ -25,6 +28,9 @@ const DEFAULT_SETTINGS: GHSyncSettings = {
 	checkStatusOnLoad: true,
 	noticeLevel: 'ALL',
 	showSyncSuccessNotice: true,
+	mobileTokenKey: '',
+	mobileAuthorName: 'Obsidian Mobile',
+	mobileAuthorEmail: 'obsidian-mobile@users.noreply.github.com',
 }
 
 
@@ -32,6 +38,15 @@ export default class GHSyncPlugin extends Plugin {
 
 	settings: GHSyncSettings;
 	private syncInProgress = false;
+	private mobileSync?: MobileSync;
+
+	private async mobileEngine(): Promise<MobileSync> {
+		if (!this.mobileSync) {
+			const { MobileSync } = await import('./src/mobile/MobileSync');
+			this.mobileSync = new MobileSync(this.app, () => this.settings);
+		}
+		return this.mobileSync;
+	}
 
 	private shouldShowNotice(severity: NoticeSeverity): boolean {
 		switch (this.settings.noticeLevel) {
@@ -71,6 +86,12 @@ export default class GHSyncPlugin extends Plugin {
 
 		this.syncInProgress = true;
 		try {
+		if (Platform.isMobile) {
+			await (await this.mobileEngine()).sync();
+			this.showSyncSuccessNotice();
+			return;
+		}
+		const { simpleGit } = await import('simple-git');
 		const remote = this.settings.remoteURL.trim();
 		if (!remote) {
 			this.showNotice('GitHub Sync: configure a remote URL before syncing.', 'ERROR');
@@ -190,6 +211,8 @@ export default class GHSyncPlugin extends Plugin {
 		}
 
 		this.showSyncSuccessNotice();
+		} catch (error) {
+			this.showNotice(error, 'ERROR', 10000);
 		} finally {
 			this.syncInProgress = false;
 		}
@@ -197,8 +220,21 @@ export default class GHSyncPlugin extends Plugin {
 
 	async CheckStatusOnStart()
 	{
+		if (Platform.isMobile) {
+			try {
+				if (this.settings.isSyncOnLoad) {
+					await this.SyncNotes();
+				} else if (await (await this.mobileEngine()).checkRemote()) {
+					this.showNotice('GitHub Sync: remote changes are available. Tap Sync with Remote.', 'WARNING');
+				}
+			} catch (error) {
+				this.showNotice(error, 'ERROR', 10000);
+			}
+			return;
+		}
 		// check status
 		try {
+			const { simpleGit } = await import('simple-git');
 			const simpleGitOptions: Partial<SimpleGitOptions> = {
 				//@ts-ignore
 			    baseDir: this.app.vault.adapter.getBasePath(),
@@ -258,15 +294,10 @@ export default class GHSyncPlugin extends Plugin {
 			let interval: number = this.settings.syncinterval;
 			if (interval >= 1)
 			{
-				try {
-					setIntervalAsync(async () => {
-						await this.SyncNotes();
-					}, interval * 60 * 1000);
-					//this.registerInterval(setInterval(this.SyncNotes, interval * 6 * 1000));
-					this.showNotice("Auto sync enabled", 'INFO');
-				} catch (e) {
-					
-				}
+				this.registerInterval(window.setInterval(() => {
+					void this.SyncNotes();
+				}, interval * 60 * 1000));
+				this.showNotice('Auto sync enabled while Obsidian is running', 'INFO');
 			}
 		}
 
@@ -308,7 +339,9 @@ class GHSyncSettingTab extends PluginSettingTab {
 
 		const howto = containerEl.createEl("div", { cls: "howto" });
 		howto.createEl("div", { text: "How to use this plugin", cls: "howto_title" });
-		howto.createEl("small", { text: "Grab your GitHub repository's HTTPS or SSH url and paste it into the settings here. If you're not authenticated, the first sync with this plugin should prompt you to authenticate. If you've already setup SSH on your device with GitHub, you won't need to authenticate - just paste your repo's SSH url into the settings here.", cls: "howto_text" });
+		howto.createEl("small", { text: Platform.isMobile
+			? 'Mobile setup: use an HTTPS GitHub repository URL. Select a GitHub token in SecretStorage for private repositories or authenticated push. The initial sync supports an empty vault or one with compatible Git metadata; existing notes will never be overwritten silently.'
+			: 'Desktop setup: use the repository HTTPS or SSH URL. Git must be installed and authentication configured. See the README for details.', cls: "howto_text" });
 		howto.createEl("br");
         const linkEl = howto.createEl('p');
         linkEl.createEl('span', { text: 'See the ' });
@@ -327,7 +360,34 @@ class GHSyncSettingTab extends PluginSettingTab {
 				})
         	.inputEl.addClass('my-plugin-setting-text'));
 
-		new Setting(containerEl)
+		if (Platform.isMobile) {
+			new Setting(containerEl)
+				.setName('GitHub token')
+				.setDesc('Choose a secret containing a fine-grained GitHub token with Contents read/write access. The token stays in local SecretStorage.')
+				.addComponent(el => new SecretComponent(this.app, el)
+					.setValue(this.plugin.settings.mobileTokenKey)
+					.onChange(async value => {
+						this.plugin.settings.mobileTokenKey = value;
+						await this.plugin.saveSettings();
+					}));
+			new Setting(containerEl)
+				.setName('Commit author name')
+				.addText(text => text
+					.setValue(this.plugin.settings.mobileAuthorName)
+					.onChange(async value => {
+						this.plugin.settings.mobileAuthorName = value;
+						await this.plugin.saveSettings();
+					}));
+			new Setting(containerEl)
+				.setName('Commit author email')
+				.addText(text => text
+					.setValue(this.plugin.settings.mobileAuthorEmail)
+					.onChange(async value => {
+						this.plugin.settings.mobileAuthorEmail = value;
+						await this.plugin.saveSettings();
+					}));
+		}
+		if (!Platform.isMobile) new Setting(containerEl)
 			.setName('git binary location')
 			.setDesc('This is optional! Set this only if git is not findable via your system PATH, then provide its location here. See README for more info.')
 			.addText(text => text

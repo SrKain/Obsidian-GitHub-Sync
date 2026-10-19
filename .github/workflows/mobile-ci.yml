@@ -1,0 +1,41 @@
+name: Build and validate mobile plugin
+on:
+  push:
+    branches: [feature/mobile-sync]
+  pull_request:
+    branches: [main, fix/sync-reliability]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Compile and bundle plugin
+        run: npm run build
+      - name: Exercise mobile filesystem and real Git operations
+        run: node tests/mobile-adapter.cjs
+      - name: End-to-end bidirectional Git synchronization
+        run: node tests/mobile-e2e.cjs
+      - name: Publish beta plugin files
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-sync-mobile-beta
+          path: |
+            main.js
+            manifest.json
+            styles.css
+          retention-days: 14
+      - name: Ensure browser/mobile bundle has no eager Node imports
+        run: |
+          test -f main.js
+          node -e "const fs=require('fs'); const s=fs.readFileSync('main.js','utf8'); if(!s.includes('MobileSync')) process.exit(1)"
