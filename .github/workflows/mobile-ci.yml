@@ -1,9 +1,9 @@
 name: Build and validate mobile plugin
 on:
   push:
-    branches: [feature/mobile-sync]
+    branches: [feature/mobile-sync, feature/sync-2-reliability]
   pull_request:
-    branches: [main, fix/sync-reliability]
+    branches: [main]
 permissions:
   contents: read
 jobs:
@@ -22,6 +22,8 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Compile and bundle plugin
         run: npm run build
+      - name: Validate shared sync safety rules
+        run: node tests/sync-safety.cjs
       - name: Exercise mobile filesystem and real Git operations
         run: node tests/mobile-adapter.cjs
       - name: End-to-end bidirectional Git synchronization
