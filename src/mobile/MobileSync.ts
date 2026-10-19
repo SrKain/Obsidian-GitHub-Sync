@@ -1,5 +1,5 @@
 import { App, requestUrl } from 'obsidian';
-import { PLUGIN_SETTINGS_PATH, retryRead, sameRemote, validateRemote } from '../core/SyncSafety';
+import { PLUGIN_SETTINGS_PATH, classifySyncError, retryRead, sameRemote, SyncConflictError, validateRemote } from '../core/SyncSafety';
 import { VaultGitFS } from './VaultGitFS';
 
 /**
@@ -206,8 +206,14 @@ export class MobileSync {
             author, committer: author, onAuth: this.onAuth,
           });
         } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error);
-          throw new Error('Pull could not complete. Local commits were preserved; nothing was pushed. Check for merge conflicts or network errors: ' + reason);
+          const data = (error as { data?: { filepaths?: string[] } })?.data;
+          const files = Array.isArray(data?.filepaths) ? data.filepaths : [];
+          if (files.length || classifySyncError(error) === 'conflict') {
+            throw new SyncConflictError(files);
+          }
+          // Propagate the original error for classification by the UI.
+          // Do not include raw HTTP headers, tokens, or URLs in notices.
+          throw error;
         }
       }
       await git.push({
