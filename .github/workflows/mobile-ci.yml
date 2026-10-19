@@ -1,9 +1,9 @@
 name: Build and validate mobile plugin
 on:
   push:
-    branches: [feature/mobile-sync, feature/sync-2-reliability, feature/sync-2-setup-wizard]
+    branches: [feature/mobile-sync, feature/sync-2-reliability, feature/sync-2-setup-wizard, feature/sync-2-conflict-recovery]
   pull_request:
-    branches: [main, feature/sync-2-reliability]
+    branches: [main, feature/sync-2-reliability, feature/sync-2-setup-wizard]
 permissions:
   contents: read
 jobs:
