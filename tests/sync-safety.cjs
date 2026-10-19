@@ -30,6 +30,9 @@ const esbuild = require('esbuild');
     assert.equal(classifySyncError(new Error('HTTP 401 Invalid credentials')), 'auth');
     assert.equal(classifySyncError(new Error('403 permission denied')), 'permission');
     assert.equal(classifySyncError(new Error('Merge conflict')), 'conflict');
+    const conflict = new (require(compiled).SyncConflictError)(['note.md']);
+    assert.equal(classifySyncError(conflict), 'conflict');
+    assert.deepEqual(conflict.files, ['note.md']);
 
     const leaked = publicErrorMessage(new Error('unknown: github_pat_dont_echo_private_123'));
     assert(!leaked.includes('github_pat_'), 'never forward unsafe raw error data');
