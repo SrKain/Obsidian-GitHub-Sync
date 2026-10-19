@@ -1,10 +1,10 @@
 {
-	"id": "github-sync",
-	"name": "GitHub Sync",
-	"version": "1.0.7",
-	"minAppVersion": "0.15.0",
-	"description": "Sync vault to personal GitHub.",
-	"author": "Kevin Chin",
-	"authorUrl": "https://kevin.gd/",
-	"isDesktopOnly": true
+  "id": "github-sync",
+  "name": "GitHub Sync",
+  "version": "1.1.0-beta.1",
+  "minAppVersion": "1.11.4",
+  "description": "Sync your Obsidian vault to GitHub on desktop and mobile.",
+  "author": "Kevin Chin",
+  "authorUrl": "https://kevin.gd/",
+  "isDesktopOnly": false
 }
