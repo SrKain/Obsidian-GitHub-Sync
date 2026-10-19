@@ -43,7 +43,7 @@ export class MobileSync {
 
   private get onAuth() {
     const settings = this.getSettings();
-    const token = this.app.secretStorage.getSecret(settings.mobileTokenKey);
+    const token = settings.mobileTokenKey ? this.app.secretStorage.getSecret(settings.mobileTokenKey) : null;
     return () => token ? { username: 'x-access-token', password: token } : {};
   }
 
