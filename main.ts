@@ -294,15 +294,10 @@ export default class GHSyncPlugin extends Plugin {
 			let interval: number = this.settings.syncinterval;
 			if (interval >= 1)
 			{
-				try {
-					setIntervalAsync(async () => {
-						await this.SyncNotes();
-					}, interval * 60 * 1000);
-					//this.registerInterval(setInterval(this.SyncNotes, interval * 6 * 1000));
-					this.showNotice("Auto sync enabled", 'INFO');
-				} catch (e) {
-					
-				}
+				this.registerInterval(window.setInterval(() => {
+					void this.SyncNotes();
+				}, interval * 60 * 1000));
+				this.showNotice('Auto sync enabled while Obsidian is running', 'INFO');
 			}
 		}
 
@@ -363,7 +358,34 @@ class GHSyncSettingTab extends PluginSettingTab {
 				})
         	.inputEl.addClass('my-plugin-setting-text'));
 
-		new Setting(containerEl)
+		if (Platform.isMobile) {
+			new Setting(containerEl)
+				.setName('GitHub token')
+				.setDesc('Choose a secret containing a fine-grained GitHub token with Contents read/write access. The token stays in local SecretStorage.')
+				.addComponent(el => new SecretComponent(this.app, el)
+					.setValue(this.plugin.settings.mobileTokenKey)
+					.onChange(async value => {
+						this.plugin.settings.mobileTokenKey = value;
+						await this.plugin.saveSettings();
+					}));
+			new Setting(containerEl)
+				.setName('Commit author name')
+				.addText(text => text
+					.setValue(this.plugin.settings.mobileAuthorName)
+					.onChange(async value => {
+						this.plugin.settings.mobileAuthorName = value;
+						await this.plugin.saveSettings();
+					}));
+			new Setting(containerEl)
+				.setName('Commit author email')
+				.addText(text => text
+					.setValue(this.plugin.settings.mobileAuthorEmail)
+					.onChange(async value => {
+						this.plugin.settings.mobileAuthorEmail = value;
+						await this.plugin.saveSettings();
+					}));
+		}
+		if (!Platform.isMobile) new Setting(containerEl)
 			.setName('git binary location')
 			.setDesc('This is optional! Set this only if git is not findable via your system PATH, then provide its location here. See README for more info.')
 			.addText(text => text
