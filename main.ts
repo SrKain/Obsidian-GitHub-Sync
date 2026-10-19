@@ -155,7 +155,7 @@ export default class GHSyncPlugin extends Plugin {
   }
 
   /** Connectivity test without committing, cloning, or changing user notes. */
-  async diagnoseConnection(): Promise<void> {
+  async diagnoseConnection(): Promise<boolean> {
     try {
       const remote = validateRemote(this.settings.remoteURL, Platform.isMobile);
       if (Platform.isMobile) {
@@ -165,9 +165,16 @@ export default class GHSyncPlugin extends Plugin {
         await retryRead(() => git.listRemote(['--heads', remote]));
       }
       this.showNotice('GitHub repository is reachable. Write permissions will be verified on the first push.', 'INFO', 7000);
+      return true;
     } catch (error) {
       this.showNotice(publicErrorMessage(error), 'ERROR', 10000);
+      return false;
     }
+  }
+
+  async openSetupWizard(): Promise<void> {
+    const { SetupWizard } = await import('./src/ui/SetupWizard');
+    new SetupWizard(this.app, this).open();
   }
 
   async SyncNotes(): Promise<void> {
@@ -228,6 +235,11 @@ export default class GHSyncPlugin extends Plugin {
 			callback: () => { void this.SyncNotes(); }
 		});
 		this.addCommand({
+			id: 'github-sync-setup',
+			name: 'Set up GitHub Sync',
+			callback: () => { void this.openSetupWizard(); }
+		});
+		this.addCommand({
 			id: 'github-sync-diagnose',
 			name: 'Test GitHub connection',
 			callback: () => { void this.diagnoseConnection(); }
@@ -283,6 +295,14 @@ class GHSyncSettingTab extends PluginSettingTab {
 		const {containerEl} = this;
 
 		containerEl.empty();
+
+		new Setting(containerEl)
+			.setName('Guided setup')
+			.setDesc('Connect your vault with step-by-step checks. No terminal commands are needed for an empty mobile vault.')
+			.addButton(button => button
+				.setButtonText('Start setup')
+				.setCta()
+				.onClick(() => { void this.plugin.openSetupWizard(); }));
 
 		const howto = containerEl.createEl("div", { cls: "howto" });
 		howto.createEl("div", { text: "How to use this plugin", cls: "howto_title" });
