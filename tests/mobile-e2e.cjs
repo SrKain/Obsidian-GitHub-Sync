@@ -164,7 +164,7 @@ Module._load=function(id,parent,isMain){
     fs.writeFileSync(path.join(mobileDir,'notes.md'),'Local conflicting edit\n');
     fs.writeFileSync(path.join(desktop,'notes.md'),'Remote conflicting edit\n');
     git(desktop,'add','.');git(desktop,'commit','-m','remote conflict');git(desktop,'push','origin','main');
-    await assert.rejects(()=>mobile.sync(),/Pull could not complete/);
+    await assert.rejects(()=>mobile.sync(),/Merge conflict|Pull could not complete/);
     assert.equal(fs.readFileSync(path.join(mobileDir,'notes.md'),'utf8'),'Local conflicting edit\n','conflict does not discard local edit');
     const remoteText=git(desktop,'show','HEAD:notes.md');
     assert.equal(remoteText,'Remote conflicting edit\n','conflict does not push to remote');

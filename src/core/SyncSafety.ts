@@ -1,3 +1,13 @@
+/** A conflict is not an ordinary network error and cannot be retried automatically. */
+export class SyncConflictError extends Error {
+  readonly files: string[];
+  constructor(files: string[]) {
+    super('Merge conflict requires manual resolution');
+    this.name = 'SyncConflictError';
+    this.files = files;
+  }
+}
+
 /**
  * Shared safety checks. These functions deliberately have no Obsidian, Git,
  * Electron, or filesystem dependencies so they work on phones and desktops.
