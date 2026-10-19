@@ -1,6 +1,7 @@
 import { App, Notice, Platform, Plugin, PluginSettingTab, SecretComponent, Setting } from 'obsidian';
 import type { SimpleGitOptions } from 'simple-git';
 import type { MobileSync } from './src/mobile/MobileSync';
+import { PLUGIN_SETTINGS_PATH, publicErrorMessage, retryRead, sameRemote, validateRemote } from './src/core/SyncSafety';
 
 type NoticeLevelSetting = 'ALL' | 'WARNING' | 'ERROR';
 type LegacyNoticeLevelSetting = NoticeLevelSetting | 'WARNINGS';
@@ -18,6 +19,7 @@ interface GHSyncSettings {
 	mobileTokenKey: string;
 	mobileAuthorName: string;
 	mobileAuthorEmail: string;
+	lastSuccessfulSync: string;
 }
 
 const DEFAULT_SETTINGS: GHSyncSettings = {
@@ -31,6 +33,7 @@ const DEFAULT_SETTINGS: GHSyncSettings = {
 	mobileTokenKey: '',
 	mobileAuthorName: 'Obsidian Mobile',
 	mobileAuthorEmail: 'obsidian-mobile@users.noreply.github.com',
+	lastSuccessfulSync: '',
 }
 
 
@@ -77,198 +80,123 @@ export default class GHSyncPlugin extends Plugin {
 		this.showNotice('github sync successful', 'INFO');
 	}
 
-	async SyncNotes()
-	{
-		if (this.syncInProgress) {
-			this.showNotice('GitHub Sync: synchronization already in progress.', 'WARNING');
-			return;
-		}
+  private async desktopGit() {
+    const { simpleGit } = await import('simple-git');
+    const options: Partial<SimpleGitOptions> = {
+      // Desktop only; the adapter exposes a native path on these platforms.
+      // @ts-ignore desktop-only API
+      baseDir: this.app.vault.adapter.getBasePath(),
+      binary: this.settings.gitLocation + 'git',
+      maxConcurrentProcesses: 1,
+      trimmed: false,
+    };
+    return simpleGit(options);
+  }
 
-		this.syncInProgress = true;
-		try {
-		if (Platform.isMobile) {
-			await (await this.mobileEngine()).sync();
-			this.showSyncSuccessNotice();
-			return;
-		}
-		const { simpleGit } = await import('simple-git');
-		const remote = this.settings.remoteURL.trim();
-		if (!remote) {
-			this.showNotice('GitHub Sync: configure a remote URL before syncing.', 'ERROR');
-			return;
-		}
+  private async syncDesktop(): Promise<void> {
+    const remote = validateRemote(this.settings.remoteURL, false);
+    const git = await this.desktopGit();
+    let status;
+    try {
+      status = await git.status();
+    } catch {
+      throw new Error('This vault is not a Git repository or Git is unavailable. Initialize Git and verify the configured executable.');
+    }
+    const branches = await git.branchLocal();
+    if (branches.current !== 'main') {
+      throw new Error('The current Git branch is not main. Switch the vault to main before syncing.');
+    }
+    if (status.conflicted.length) {
+      throw new Error('Merge conflicts remain: ' + status.conflicted.slice(0, 5).join(', '));
+    }
 
-		const simpleGitOptions: Partial<SimpleGitOptions> = {
-			//@ts-ignore
-		    baseDir: this.app.vault.adapter.getBasePath(),
-		    binary: this.settings.gitLocation + "git",
-		    maxConcurrentProcesses: 6,
-		    trimmed: false,
-		};
-		const git = simpleGit(simpleGitOptions);
+    // Never silently change the destination of a vault. This can push
+    // personal notes to the wrong repository.
+    const remotes = await git.getRemotes(true);
+    const origin = remotes.find(entry => entry.name === 'origin');
+    if (!origin) {
+      await git.addRemote('origin', remote);
+    } else if (!sameRemote(origin.refs.fetch, remote) || !sameRemote(origin.refs.push, remote)) {
+      throw new Error('The configured repository differs from this vault origin. Review the destination before making changes.');
+    }
 
-		let os = require("os");
-		let hostname = os.hostname();
+    // A previously committed plugin data.json can contain older URL-embedded
+    // credentials. Refuse to sync until the user untracks it.
+    const trackedSecret = await git.raw(['ls-files', '--', PLUGIN_SETTINGS_PATH]);
+    if (trackedSecret.trim()) {
+      throw new Error('Git is tracking plugin settings (data.json). Untrack this file and rotate any exposed credentials before syncing.');
+    }
+    if (!status.isClean()) {
+      // Include deletions but exclude our settings, even when the user has
+      // not added it to .gitignore.
+      await git.add(['-A', '--', '.', ':' + '!' + PLUGIN_SETTINGS_PATH]);
+      const staged = await git.diff(['--cached', '--name-only']);
+      if (staged.trim()) {
+        await git.commit('Obsidian desktop ' + new Date().toISOString());
+      }
+    }
 
-		let statusResult = await git.status().catch((e) => {
-			this.showNotice("Vault is not a Git repo or git binary cannot be found.", 'ERROR', 10000);
-			return; })
+    // Fetch is read-only and safely retried on transient network errors.
+    await retryRead(() => git.fetch('origin', 'main'));
+    try {
+      await git.pull('origin', 'main', { '--no-rebase': null });
+    } catch (error) {
+      const conflicts = (await git.status()).conflicted;
+      if (conflicts.length) throw new Error('Merge conflicts remain: ' + conflicts.slice(0, 5).join(', '));
+      throw error;
+    }
+    const after = await git.status();
+    if (after.conflicted.length) {
+      throw new Error('Merge conflicts remain: ' + after.conflicted.slice(0, 5).join(', '));
+    }
+    // Push once. Do not automatically retry a write after an uncertain
+    // network result; a retry may hide other concurrent writes.
+    await git.push('origin', 'main', ['-u']);
+  }
 
-		if (!statusResult) {
-			return;
-		}
+  async SyncNotes(): Promise<void> {
+    if (this.syncInProgress) {
+      this.showNotice('GitHub Sync: synchronization is already running.', 'WARNING');
+      return;
+    }
+    this.syncInProgress = true;
+    try {
+      validateRemote(this.settings.remoteURL, Platform.isMobile);
+      if (Platform.isMobile) await (await this.mobileEngine()).sync();
+      else await this.syncDesktop();
+      this.settings.lastSuccessfulSync = new Date().toISOString();
+      await this.saveSettings();
+      this.showSyncSuccessNotice();
+    } catch (error) {
+      this.showNotice(publicErrorMessage(error), 'ERROR', 10000);
+    } finally {
+      this.syncInProgress = false;
+    }
+  }
 
-		if (statusResult.conflicted.length > 0) {
-			this.showNotice('GitHub Sync: resolve and stage existing merge conflicts before syncing.', 'WARNING', 10000);
-			return;
-		}
-
-		//@ts-ignore
-		let clean = statusResult.isClean();
-
-    	let date = new Date();
-    	let msg = hostname + " " + date.getFullYear() + "-" + (date.getMonth() + 1) + "-" + date.getDate() + ":" + date.getHours() + ":" + date.getMinutes() + ":" + date.getSeconds();
-
-		// git add .
-		// git commit -m hostname-date-time
-		if (!clean) {
-			try {
-				await git
-		    		.add("./*")
-		    		.commit(msg);
-		    } catch (e) {
-		    	this.showNotice(e, 'ERROR', 10000);
-		    	return;
-		    }
-		}
-
-		// Preserve the existing origin when it already points to the configured remote.
-		try {
-			const remotes = await git.getRemotes(true);
-			const origin = remotes.find((entry) => entry.name === 'origin');
-			if (!origin) {
-				await git.addRemote('origin', remote);
-			} else {
-				if (origin.refs.fetch !== remote) {
-					await git.remote(['set-url', 'origin', remote]);
-				}
-				if (origin.refs.push !== remote) {
-					await git.remote(['set-url', '--push', 'origin', remote]);
-				}
-			}
-		} catch (e) {
-			this.showNotice(e, 'ERROR', 10000);
-			return;
-		}
-		// check if remote url valid by fetching
-		try {
-			await git.fetch();
-		} catch (e) {
-			this.showNotice(String(e) + "\nGitHub Sync: Invalid remote URL.", 'ERROR', 10000);
-			return;
-		}
-
-		// git pull origin main
-	    try {
-	    	await git.pull('origin', 'main', { '--no-rebase': null });
-	    } catch (e) {
-	    	let conflictStatus = await git.status().catch((error) => { this.showNotice(error, 'ERROR', 10000); return; });
-	    	if (!conflictStatus) {
-	    		return;
-	    	}
-			if (conflictStatus.conflicted.length === 0) {
-				this.showNotice(e, 'ERROR', 10000);
-				return;
-			}
-    		let conflictMsg = "Merge conflicts in:";
-	    	//@ts-ignore
-			for (let c of conflictStatus.conflicted)
-			{
-				conflictMsg += "\n\t"+c;
-			}
-			conflictMsg += "\nResolve and stage these files with git add, then sync again."
-			this.showNotice(conflictMsg, 'WARNING');
-			//@ts-ignore	
-			for (let c of conflictStatus.conflicted)
-			{
-				this.app.workspace.openLinkText("", c, true);
-			}
-	    	return;
-	    }
-
-		// Push even if the vault was initially clean: local commits or a merge
-		// performed by pull may still need to be sent to origin.
-		try {
-			const finalStatus = await git.status();
-			if (finalStatus.conflicted.length > 0) {
-				this.showNotice('GitHub Sync: merge conflicts must be resolved before pushing.', 'WARNING', 10000);
-				return;
-			}
-			await git.push('origin', 'main', ['-u']);
-		} catch (e) {
-			this.showNotice(e, 'ERROR', 10000);
-			return;
-		}
-
-		this.showSyncSuccessNotice();
-		} catch (error) {
-			this.showNotice(error, 'ERROR', 10000);
-		} finally {
-			this.syncInProgress = false;
-		}
-	}
-
-	async CheckStatusOnStart()
-	{
-		if (Platform.isMobile) {
-			try {
-				if (this.settings.isSyncOnLoad) {
-					await this.SyncNotes();
-				} else if (await (await this.mobileEngine()).checkRemote()) {
-					this.showNotice('GitHub Sync: remote changes are available. Tap Sync with Remote.', 'WARNING');
-				}
-			} catch (error) {
-				this.showNotice(error, 'ERROR', 10000);
-			}
-			return;
-		}
-		// check status
-		try {
-			const { simpleGit } = await import('simple-git');
-			const simpleGitOptions: Partial<SimpleGitOptions> = {
-				//@ts-ignore
-			    baseDir: this.app.vault.adapter.getBasePath(),
-			    binary: this.settings.gitLocation + "git",
-			    maxConcurrentProcesses: 6,
-			    trimmed: false,
-			};
-			const git = simpleGit(simpleGitOptions);
-
-			//check for remote changes
-			// git branch --set-upstream-to=origin/main main
-			await git.branch({'--set-upstream-to': 'origin/main'});
-			let statusUponOpening = await git.fetch().status();
-			if (statusUponOpening.behind > 0)
-			{
-				// Automatically sync if needed
-				if (this.settings.isSyncOnLoad == true)
-				{
-					this.SyncNotes();
-				}
-				else
-				{
-					this.showNotice("GitHub Sync: " + statusUponOpening.behind + " commits behind remote.\nClick the GitHub ribbon icon to sync.", 'WARNING');
-				}
-			}
-			else
-			{
-				this.showNotice("GitHub Sync: up to date with remote.", 'INFO');
-			}
-		} catch (e) {
-			// don't care
-			// based
-		}
-	}
+  async CheckStatusOnStart(): Promise<void> {
+    if (!this.settings.remoteURL.trim() || this.syncInProgress) return;
+    try {
+      if (this.settings.isSyncOnLoad) {
+        await this.SyncNotes();
+        return;
+      }
+      if (Platform.isMobile) {
+        if (await (await this.mobileEngine()).checkRemote()) {
+          this.showNotice('Remote changes are available. Select Sync with Remote to download.', 'WARNING');
+        }
+      } else {
+        const git = await this.desktopGit();
+        await retryRead(() => git.fetch('origin', 'main'));
+        const behind = Number((await git.raw(['rev-list', '--count', 'HEAD..refs/remotes/origin/main'])).trim());
+        if (behind > 0) {
+          this.showNotice('GitHub Sync: ' + behind + ' remote commits are pending. Select Sync with Remote.', 'WARNING');
+        }
+      }
+    } catch (error) {
+      this.showNotice(publicErrorMessage(error), 'WARNING', 10000);
+    }
+  }
 
 	async onload() {
 		await this.loadSettings();
