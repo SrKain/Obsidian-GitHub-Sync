@@ -72,7 +72,6 @@ const git=(dir,...args)=>execFileSync('git',['-C',dir,...args],{encoding:'utf8'}
     git(seed,'push','origin','main');
     await fsp.writeFile(path.join(vault,'note.md'),'my conflicting local edit\n');
     await assert.rejects(() => runDesktopSync(client,bare),error => {
-      console.error('Conflict diagnostic', { name: error.name, message: error.message, state: git(vault,'status','--porcelain') });
       assert.equal(error.name,'SyncConflictError');
       assert(error.files.includes('note.md'));
       return true;
