@@ -1,6 +1,6 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, Vault } from 'obsidian';
-import { simpleGit, SimpleGitOptions } from 'simple-git';
-import { setIntervalAsync, clearIntervalAsync } from 'set-interval-async';
+import { App, Notice, Platform, Plugin, PluginSettingTab, SecretComponent, Setting } from 'obsidian';
+import type { SimpleGitOptions } from 'simple-git';
+import type { MobileSync } from './src/mobile/MobileSync';
 
 type NoticeLevelSetting = 'ALL' | 'WARNING' | 'ERROR';
 type LegacyNoticeLevelSetting = NoticeLevelSetting | 'WARNINGS';
@@ -15,6 +15,9 @@ interface GHSyncSettings {
 	checkStatusOnLoad: boolean;
 	noticeLevel: NoticeLevelSetting;
 	showSyncSuccessNotice: boolean;
+	mobileTokenKey: string;
+	mobileAuthorName: string;
+	mobileAuthorEmail: string;
 }
 
 const DEFAULT_SETTINGS: GHSyncSettings = {
@@ -25,6 +28,9 @@ const DEFAULT_SETTINGS: GHSyncSettings = {
 	checkStatusOnLoad: true,
 	noticeLevel: 'ALL',
 	showSyncSuccessNotice: true,
+	mobileTokenKey: '',
+	mobileAuthorName: 'Obsidian Mobile',
+	mobileAuthorEmail: 'obsidian-mobile@users.noreply.github.com',
 }
 
 
@@ -32,6 +38,15 @@ export default class GHSyncPlugin extends Plugin {
 
 	settings: GHSyncSettings;
 	private syncInProgress = false;
+	private mobileSync?: MobileSync;
+
+	private async mobileEngine(): Promise<MobileSync> {
+		if (!this.mobileSync) {
+			const { MobileSync } = await import('./src/mobile/MobileSync');
+			this.mobileSync = new MobileSync(this.app, () => this.settings);
+		}
+		return this.mobileSync;
+	}
 
 	private shouldShowNotice(severity: NoticeSeverity): boolean {
 		switch (this.settings.noticeLevel) {
@@ -71,6 +86,12 @@ export default class GHSyncPlugin extends Plugin {
 
 		this.syncInProgress = true;
 		try {
+		if (Platform.isMobile) {
+			await (await this.mobileEngine()).sync();
+			this.showSyncSuccessNotice();
+			return;
+		}
+		const { simpleGit } = await import('simple-git');
 		const remote = this.settings.remoteURL.trim();
 		if (!remote) {
 			this.showNotice('GitHub Sync: configure a remote URL before syncing.', 'ERROR');
@@ -190,6 +211,8 @@ export default class GHSyncPlugin extends Plugin {
 		}
 
 		this.showSyncSuccessNotice();
+		} catch (error) {
+			this.showNotice(error, 'ERROR', 10000);
 		} finally {
 			this.syncInProgress = false;
 		}
@@ -197,8 +220,21 @@ export default class GHSyncPlugin extends Plugin {
 
 	async CheckStatusOnStart()
 	{
+		if (Platform.isMobile) {
+			try {
+				if (this.settings.isSyncOnLoad) {
+					await this.SyncNotes();
+				} else if (await (await this.mobileEngine()).checkRemote()) {
+					this.showNotice('GitHub Sync: remote changes are available. Tap Sync with Remote.', 'WARNING');
+				}
+			} catch (error) {
+				this.showNotice(error, 'ERROR', 10000);
+			}
+			return;
+		}
 		// check status
 		try {
+			const { simpleGit } = await import('simple-git');
 			const simpleGitOptions: Partial<SimpleGitOptions> = {
 				//@ts-ignore
 			    baseDir: this.app.vault.adapter.getBasePath(),
