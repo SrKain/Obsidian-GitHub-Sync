@@ -61,6 +61,23 @@ const git=(dir,...args)=>execFileSync('git',['-C',dir,...args],{encoding:'utf8'}
     git(vault,'commit','-m','accidental sensitive config');
     await assert.rejects(()=>runDesktopSync(client,bare),/tracking plugin settings/);
     assert.notEqual(run('--git-dir',bare,'rev-parse','main'),git(vault,'rev-parse','HEAD'));
+
+    // Conflicting edits must not be pushed; the local revision stays in Git.
+    git(vault,'rm','--cached','--',secretPath);
+    git(vault,'commit','-m','untrack plugin settings');
+    await runDesktopSync(client,bare);
+    git(seed,'pull','--ff-only','origin','main');
+    await fsp.writeFile(path.join(seed,'note.md'),'competing remote edit\n');
+    git(seed,'add','note.md');git(seed,'commit','-m','concurrent desktop edit');
+    git(seed,'push','origin','main');
+    await fsp.writeFile(path.join(vault,'note.md'),'my conflicting local edit\n');
+    await assert.rejects(() => runDesktopSync(client,bare),error => {
+      assert.equal(error.name,'SyncConflictError');
+      assert(error.files.includes('note.md'));
+      return true;
+    });
+    assert.equal(git(vault,'show','HEAD:note.md'),'my conflicting local edit\n');
+    assert.equal(run('--git-dir',bare,'show','main:note.md'),'competing remote edit\n');
     console.log('Desktop end-to-end Git regression test passed');
   }finally{
     await fsp.rm(temp,{recursive:true,force:true});
