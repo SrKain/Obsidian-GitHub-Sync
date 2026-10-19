@@ -339,7 +339,9 @@ class GHSyncSettingTab extends PluginSettingTab {
 
 		const howto = containerEl.createEl("div", { cls: "howto" });
 		howto.createEl("div", { text: "How to use this plugin", cls: "howto_title" });
-		howto.createEl("small", { text: "Grab your GitHub repository's HTTPS or SSH url and paste it into the settings here. If you're not authenticated, the first sync with this plugin should prompt you to authenticate. If you've already setup SSH on your device with GitHub, you won't need to authenticate - just paste your repo's SSH url into the settings here.", cls: "howto_text" });
+		howto.createEl("small", { text: Platform.isMobile
+			? 'Mobile setup: use an HTTPS GitHub repository URL. Select a GitHub token in SecretStorage for private repositories or authenticated push. The initial sync supports an empty vault or one with compatible Git metadata; existing notes will never be overwritten silently.'
+			: 'Desktop setup: use the repository HTTPS or SSH URL. Git must be installed and authentication configured. See the README for details.', cls: "howto_text" });
 		howto.createEl("br");
         const linkEl = howto.createEl('p');
         linkEl.createEl('span', { text: 'See the ' });
