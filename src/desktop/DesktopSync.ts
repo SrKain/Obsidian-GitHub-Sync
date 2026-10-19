@@ -1,5 +1,5 @@
 import type { SimpleGit } from 'simple-git';
-import { PLUGIN_SETTINGS_PATH, retryRead, sameRemote } from '../core/SyncSafety';
+import { PLUGIN_SETTINGS_PATH, retryRead, sameRemote, SyncConflictError } from '../core/SyncSafety';
 
 /**
  * Native Git runner, testable independently of Obsidian.
@@ -21,7 +21,7 @@ export async function runDesktopSync(
     throw new Error('The current Git branch is not main.');
   }
   if (status.conflicted.length) {
-    throw new Error('Merge conflicts remain: ' + status.conflicted.slice(0, 5).join(', '));
+    throw new SyncConflictError(status.conflicted);
   }
 
   // Never silently redirect notes to another repository.
@@ -49,11 +49,10 @@ export async function runDesktopSync(
     await git.pull('origin', 'main', { '--no-rebase': null });
   } catch (error) {
     const conflicts = (await git.status()).conflicted;
-    if (conflicts.length) throw new Error('Merge conflicts remain: ' + conflicts.slice(0, 5).join(', '));
+    if (conflicts.length) throw new SyncConflictError(conflicts);
     throw error;
   }
-  if ((await git.status()).conflicted.length) {
-    throw new Error('Merge conflicts remain.');
-  }
+  const pendingConflicts = (await git.status()).conflicted;
+  if (pendingConflicts.length) throw new SyncConflictError(pendingConflicts);
   await git.push('origin', 'main', ['-u']);
 }
