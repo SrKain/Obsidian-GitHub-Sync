@@ -39,7 +39,11 @@ export async function runDesktopSync(
   }
 
   if (!status.isClean()) {
-    await git.add(['-A', '--', '.', ':!' + settingsPath]);
+    // Stage only known changed paths, avoiding a broad 'git add .' that may
+    // ingest private settings even when .gitignore is incomplete.
+    const paths = [...new Set(status.files.map(file => file.path))]
+      .filter(path => path !== settingsPath);
+    if (paths.length) await git.raw(['add', '-A', '--', ...paths]);
     const staged = await git.diff(['--cached', '--name-only']);
     if (staged.trim()) await git.commit('Obsidian desktop ' + new Date().toISOString());
   }
