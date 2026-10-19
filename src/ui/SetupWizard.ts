@@ -48,7 +48,7 @@ export class SetupWizard extends Modal {
   private render(): void {
     this.contentEl.empty();
     const labels = ['Repository', 'Authentication', 'Check and connect'];
-    this.setTitle('Set up GitHub Sync');
+    this.titleEl.setText('Set up GitHub Sync');
     this.contentEl.createEl('p', {
       cls: 'github-sync-wizard-step',
       text: 'Step ' + (this.step + 1) + ' of 3 — ' + labels[this.step],
