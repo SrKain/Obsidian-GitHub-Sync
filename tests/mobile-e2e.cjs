@@ -139,7 +139,7 @@ Module._load=function(id,parent,isMain){
     await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
     port=server.address().port;
     const output=path.join(temp,'MobileSync.cjs');
-    await esbuild.build({entryPoints:['src/mobile/MobileSync.ts'],bundle:true,platform:'node',format:'cjs',target:'es2020',external:['obsidian','isomorphic-git'],outfile:output});
+    await esbuild.build({entryPoints:['src/mobile/MobileSync.ts'],bundle:true,platform:'node',format:'cjs',target:'es2020',external:['obsidian'],outfile:output});
     const {MobileSync}=require(output);
     const settings={
       remoteURL:'https://github.com/example/notes.git',
