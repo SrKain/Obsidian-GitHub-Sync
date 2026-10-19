@@ -40,3 +40,32 @@ If your plugin does not need CSS, delete this file.
     width: 30em;
 }
 
+/* Responsive, keyboard-friendly setup wizard for desktop and mobile. */
+.github-sync-wizard .modal-content {
+  max-width: 100%;
+}
+.github-sync-wizard .github-sync-wizard-step {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  margin-block: var(--size-4-3);
+}
+.github-sync-wizard .setting-item {
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+}
+.github-sync-wizard input[type="text"] {
+  min-width: min(19rem, 70vw);
+  max-width: 100%;
+}
+.github-sync-wizard-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-4);
+}
+.github-sync-wizard-status {
+  padding: var(--size-4-3);
+  background: var(--background-secondary);
+  border-radius: var(--radius-m);
+  line-height: 1.5;
+}

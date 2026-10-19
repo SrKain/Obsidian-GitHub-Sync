@@ -1,7 +1,7 @@
 import { App, Notice, Platform, Plugin, PluginSettingTab, SecretComponent, Setting } from 'obsidian';
 import type { SimpleGitOptions } from 'simple-git';
 import type { MobileSync } from './src/mobile/MobileSync';
-import { PLUGIN_SETTINGS_PATH, publicErrorMessage, retryRead, sameRemote, validateRemote } from './src/core/SyncSafety';
+import { classifySyncError, publicErrorMessage, retryRead, SyncConflictError, validateRemote } from './src/core/SyncSafety';
 
 type NoticeLevelSetting = 'ALL' | 'WARNING' | 'ERROR';
 type LegacyNoticeLevelSetting = NoticeLevelSetting | 'WARNINGS';
@@ -96,66 +96,12 @@ export default class GHSyncPlugin extends Plugin {
   private async syncDesktop(): Promise<void> {
     const remote = validateRemote(this.settings.remoteURL, false);
     const git = await this.desktopGit();
-    let status;
-    try {
-      status = await git.status();
-    } catch {
-      throw new Error('This vault is not a Git repository or Git is unavailable. Initialize Git and verify the configured executable.');
-    }
-    const branches = await git.branchLocal();
-    if (branches.current !== 'main') {
-      throw new Error('The current Git branch is not main. Switch the vault to main before syncing.');
-    }
-    if (status.conflicted.length) {
-      throw new Error('Merge conflicts remain: ' + status.conflicted.slice(0, 5).join(', '));
-    }
-
-    // Never silently change the destination of a vault. This can push
-    // personal notes to the wrong repository.
-    const remotes = await git.getRemotes(true);
-    const origin = remotes.find(entry => entry.name === 'origin');
-    if (!origin) {
-      await git.addRemote('origin', remote);
-    } else if (!sameRemote(origin.refs.fetch, remote) || !sameRemote(origin.refs.push, remote)) {
-      throw new Error('The configured repository differs from this vault origin. Review the destination before making changes.');
-    }
-
-    // A previously committed plugin data.json can contain older URL-embedded
-    // credentials. Refuse to sync until the user untracks it.
-    const trackedSecret = await git.raw(['ls-files', '--', PLUGIN_SETTINGS_PATH]);
-    if (trackedSecret.trim()) {
-      throw new Error('Git is tracking plugin settings (data.json). Untrack this file and rotate any exposed credentials before syncing.');
-    }
-    if (!status.isClean()) {
-      // Include deletions but exclude our settings, even when the user has
-      // not added it to .gitignore.
-      await git.add(['-A', '--', '.', ':' + '!' + PLUGIN_SETTINGS_PATH]);
-      const staged = await git.diff(['--cached', '--name-only']);
-      if (staged.trim()) {
-        await git.commit('Obsidian desktop ' + new Date().toISOString());
-      }
-    }
-
-    // Fetch is read-only and safely retried on transient network errors.
-    await retryRead(() => git.fetch('origin', 'main'));
-    try {
-      await git.pull('origin', 'main', { '--no-rebase': null });
-    } catch (error) {
-      const conflicts = (await git.status()).conflicted;
-      if (conflicts.length) throw new Error('Merge conflicts remain: ' + conflicts.slice(0, 5).join(', '));
-      throw error;
-    }
-    const after = await git.status();
-    if (after.conflicted.length) {
-      throw new Error('Merge conflicts remain: ' + after.conflicted.slice(0, 5).join(', '));
-    }
-    // Push once. Do not automatically retry a write after an uncertain
-    // network result; a retry may hide other concurrent writes.
-    await git.push('origin', 'main', ['-u']);
+    const { runDesktopSync } = await import('./src/desktop/DesktopSync');
+    await runDesktopSync(git, remote, this.app.vault.configDir + '/plugins/github-sync/data.json');
   }
 
   /** Connectivity test without committing, cloning, or changing user notes. */
-  async diagnoseConnection(): Promise<void> {
+  async diagnoseConnection(): Promise<boolean> {
     try {
       const remote = validateRemote(this.settings.remoteURL, Platform.isMobile);
       if (Platform.isMobile) {
@@ -165,9 +111,16 @@ export default class GHSyncPlugin extends Plugin {
         await retryRead(() => git.listRemote(['--heads', remote]));
       }
       this.showNotice('GitHub repository is reachable. Write permissions will be verified on the first push.', 'INFO', 7000);
+      return true;
     } catch (error) {
       this.showNotice(publicErrorMessage(error), 'ERROR', 10000);
+      return false;
     }
+  }
+
+  async openSetupWizard(): Promise<void> {
+    const { SetupWizard } = await import('./src/ui/SetupWizard');
+    new SetupWizard(this.app, this).open();
   }
 
   async SyncNotes(): Promise<void> {
@@ -185,6 +138,11 @@ export default class GHSyncPlugin extends Plugin {
       this.showSyncSuccessNotice();
     } catch (error) {
       this.showNotice(publicErrorMessage(error), 'ERROR', 10000);
+      if (classifySyncError(error) === 'conflict') {
+        const { ConflictRecoveryModal } = await import('./src/ui/ConflictRecoveryModal');
+        const files = error instanceof SyncConflictError ? error.files : [];
+        new ConflictRecoveryModal(this.app, files).open();
+      }
     } finally {
       this.syncInProgress = false;
     }
@@ -226,6 +184,11 @@ export default class GHSyncPlugin extends Plugin {
 			id: 'github-sync-command',
 			name: 'Sync with Remote',
 			callback: () => { void this.SyncNotes(); }
+		});
+		this.addCommand({
+			id: 'github-sync-setup',
+			name: 'Set up GitHub Sync',
+			callback: () => { void this.openSetupWizard(); }
 		});
 		this.addCommand({
 			id: 'github-sync-diagnose',
@@ -283,6 +246,14 @@ class GHSyncSettingTab extends PluginSettingTab {
 		const {containerEl} = this;
 
 		containerEl.empty();
+
+		new Setting(containerEl)
+			.setName('Guided setup')
+			.setDesc('Connect your vault with step-by-step checks. No terminal commands are needed for an empty mobile vault.')
+			.addButton(button => button
+				.setButtonText('Start setup')
+				.setCta()
+				.onClick(() => { void this.plugin.openSetupWizard(); }));
 
 		const howto = containerEl.createEl("div", { cls: "howto" });
 		howto.createEl("div", { text: "How to use this plugin", cls: "howto_title" });
