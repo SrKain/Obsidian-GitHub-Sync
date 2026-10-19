@@ -1,4 +1,5 @@
-import { App, TFile, requestUrl } from 'obsidian';
+import { App, requestUrl } from 'obsidian';
+import { PLUGIN_SETTINGS_PATH, retryRead, sameRemote, validateRemote } from '../core/SyncSafety';
 import { VaultGitFS } from './VaultGitFS';
 
 /**
@@ -26,11 +27,7 @@ export class MobileSync {
   }
 
   private get remote(): string {
-    const remote = this.getSettings().remoteURL.trim();
-    if (!/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(?:\.git)?\/?$/i.test(remote)) {
-      throw new Error('Mobile sync requires a GitHub HTTPS repository URL without embedded credentials.');
-    }
-    return remote.replace(/\/$/, '');
+    return validateRemote(this.getSettings().remoteURL, true);
   }
 
   private get author() {
@@ -44,6 +41,9 @@ export class MobileSync {
   private get onAuth() {
     const settings = this.getSettings();
     const token = settings.mobileTokenKey ? this.app.secretStorage.getSecret(settings.mobileTokenKey) : null;
+    if (settings.mobileTokenKey && !token) {
+      throw new Error('GitHub authentication failed: the selected secret is unavailable on this device.');
+    }
     return () => token ? { username: 'x-access-token', password: token } : {};
   }
 
@@ -104,6 +104,9 @@ export class MobileSync {
 
     if (await adapter.exists(this.bootstrapMarker)) {
       const paths = await git.listFiles({ fs: this.fsClient, dir: this.dir, ref: 'main' });
+      if (paths.includes(PLUGIN_SETTINGS_PATH)) {
+        throw new Error('The GitHub repository contains plugin data.json, which may expose credentials. Remove this file from Git history before continuing.');
+      }
       const collisions: string[] = [];
       for (const path of paths) if (await adapter.exists(path)) collisions.push(path);
       if (collisions.length) {
@@ -118,6 +121,12 @@ export class MobileSync {
       await adapter.remove(this.bootstrapMarker);
     }
 
+    // Refuse to upload a tracked settings file, including repositories that
+    // were initialized before this plugin version.
+    const trackedFiles = await git.listFiles({ fs: this.fsClient, dir: this.dir });
+    if (trackedFiles.includes(PLUGIN_SETTINGS_PATH)) {
+      throw new Error('Git is tracking plugin data.json. Untrack it on desktop and rotate any exposed token before syncing.');
+    }
     const branch = await git.currentBranch({ fs: this.fsClient, dir: this.dir });
     if (branch !== 'main') {
       throw new Error('Mobile sync currently supports only the main branch. Current branch: ' + branch);
@@ -127,11 +136,19 @@ export class MobileSync {
     const origin = remotes.find(entry => entry.remote === 'origin');
     if (!origin) {
       await git.addRemote({ fs: this.fsClient, dir: this.dir, remote: 'origin', url: remote });
-    } else if (origin.url !== remote) {
-      // Never silently redirect an existing vault to a different repository.
-      throw new Error('The vault origin differs from the configured GitHub URL. Resolve this mismatch on desktop first.');
+    } else if (!origin.url.startsWith('https://') || !sameRemote(origin.url, remote)) {
+      // No silent re-targeting, nor SSH URLs that fail on mobile.
+      throw new Error('Vault origin does not match the configured HTTPS repository. Resolve this mismatch on desktop first.');
     }
     return git;
+  }
+
+  /** Read-only connection test used by the setup assistant. */
+  async verifyConnection(): Promise<void> {
+    const git = await this.git();
+    await retryRead(() => git.getRemoteInfo({
+      http: this.http as any, url: this.remote, onAuth: this.onAuth,
+    }));
   }
 
   async checkRemote(): Promise<boolean> {
@@ -139,10 +156,10 @@ export class MobileSync {
       if (!await this.app.vault.adapter.exists('.git')) return false;
       if (await this.app.vault.adapter.exists(this.bootstrapMarker)) return false;
       const git = await this.prepare();
-      await git.fetch({
+      await retryRead(() => git.fetch({
         fs: this.fsClient, http: this.http as any, dir: this.dir,
         remote: 'origin', ref: 'main', singleBranch: true, onAuth: this.onAuth,
-      });
+      }));
       const local = await git.resolveRef({ fs: this.fsClient, dir: this.dir, ref: 'refs/heads/main' });
       const remote = await git.resolveRef({ fs: this.fsClient, dir: this.dir, ref: 'refs/remotes/origin/main' });
       if (local === remote) return false;
@@ -163,7 +180,7 @@ export class MobileSync {
       let changed = false;
       for (const [filepath, head, workdir, stage] of status) {
         // A plugin must never accidentally commit its own configuration.
-        if (filepath === this.app.vault.configDir + '/plugins/github-sync/data.json') continue;
+        if (filepath === PLUGIN_SETTINGS_PATH) continue;
         if (workdir === 0 && head !== 0) {
           await git.remove({ fs, dir, filepath }); changed = true;
         } else if (workdir !== 0 && (head !== workdir || workdir !== stage)) {
@@ -176,10 +193,10 @@ export class MobileSync {
           message: 'Obsidian mobile ' + new Date().toISOString(),
         });
       }
-      await git.fetch({
+      await retryRead(() => git.fetch({
         fs, http: this.http as any, dir, remote: 'origin',
         ref: 'main', singleBranch: true, onAuth: this.onAuth,
-      });
+      }));
       const local = await git.resolveRef({ fs, dir, ref: 'refs/heads/main' });
       const remote = await git.resolveRef({ fs, dir, ref: 'refs/remotes/origin/main' });
       if (local !== remote) {
