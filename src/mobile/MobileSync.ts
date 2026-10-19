@@ -143,6 +143,14 @@ export class MobileSync {
     return git;
   }
 
+  /** Read-only connection test used by the setup assistant. */
+  async verifyConnection(): Promise<void> {
+    const git = await this.git();
+    await retryRead(() => git.getRemoteInfo({
+      http: this.http as any, url: this.remote, onAuth: this.onAuth,
+    }));
+  }
+
   async checkRemote(): Promise<boolean> {
     try {
       if (!await this.app.vault.adapter.exists('.git')) return false;
