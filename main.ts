@@ -1,7 +1,7 @@
 import { App, Notice, Platform, Plugin, PluginSettingTab, SecretComponent, Setting } from 'obsidian';
 import type { SimpleGitOptions } from 'simple-git';
 import type { MobileSync } from './src/mobile/MobileSync';
-import { publicErrorMessage, retryRead, validateRemote } from './src/core/SyncSafety';
+import { classifySyncError, publicErrorMessage, retryRead, SyncConflictError, validateRemote } from './src/core/SyncSafety';
 
 type NoticeLevelSetting = 'ALL' | 'WARNING' | 'ERROR';
 type LegacyNoticeLevelSetting = NoticeLevelSetting | 'WARNINGS';
@@ -138,6 +138,11 @@ export default class GHSyncPlugin extends Plugin {
       this.showSyncSuccessNotice();
     } catch (error) {
       this.showNotice(publicErrorMessage(error), 'ERROR', 10000);
+      if (classifySyncError(error) === 'conflict') {
+        const { ConflictRecoveryModal } = await import('./src/ui/ConflictRecoveryModal');
+        const files = error instanceof SyncConflictError ? error.files : [];
+        new ConflictRecoveryModal(this.app, files).open();
+      }
     } finally {
       this.syncInProgress = false;
     }
