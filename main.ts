@@ -154,6 +154,22 @@ export default class GHSyncPlugin extends Plugin {
     await git.push('origin', 'main', ['-u']);
   }
 
+  /** Connectivity test without committing, cloning, or changing user notes. */
+  async diagnoseConnection(): Promise<void> {
+    try {
+      const remote = validateRemote(this.settings.remoteURL, Platform.isMobile);
+      if (Platform.isMobile) {
+        await (await this.mobileEngine()).verifyConnection();
+      } else {
+        const git = await this.desktopGit();
+        await retryRead(() => git.listRemote(['--heads', remote]));
+      }
+      this.showNotice('GitHub repository is reachable. Write permissions will be verified on the first push.', 'INFO', 7000);
+    } catch (error) {
+      this.showNotice(publicErrorMessage(error), 'ERROR', 10000);
+    }
+  }
+
   async SyncNotes(): Promise<void> {
     if (this.syncInProgress) {
       this.showNotice('GitHub Sync: synchronization is already running.', 'WARNING');
@@ -209,9 +225,12 @@ export default class GHSyncPlugin extends Plugin {
 		this.addCommand({
 			id: 'github-sync-command',
 			name: 'Sync with Remote',
-			callback: () => {
-				this.SyncNotes();
-			}
+			callback: () => { void this.SyncNotes(); }
+		});
+		this.addCommand({
+			id: 'github-sync-diagnose',
+			name: 'Test GitHub connection',
+			callback: () => { void this.diagnoseConnection(); }
 		});
 
 		// This adds a settings tab so the user can configure various aspects of the plugin
@@ -273,12 +292,12 @@ class GHSyncSettingTab extends PluginSettingTab {
 		howto.createEl("br");
         const linkEl = howto.createEl('p');
         linkEl.createEl('span', { text: 'See the ' });
-        linkEl.createEl('a', { href: 'https://github.com/kevinmkchin/Obsidian-GitHub-Sync/blob/main/README.md', text: 'README' });
+        linkEl.createEl('a', { href: 'https://github.com/SrKain/Obsidian-GitHub-Sync/blob/main/README.md', text: 'README' });
         linkEl.createEl('span', { text: ' for more information and troubleshooting.' });
 
 		new Setting(containerEl)
 			.setName('Remote URL')
-			.setDesc('')
+			.setDesc('Step 1 of setup: paste the repository HTTPS clone URL (or SSH on desktop). Never put a token in the URL.')
 			.addText(text => text
 				.setPlaceholder('')
 				.setValue(this.plugin.settings.remoteURL)
@@ -287,6 +306,22 @@ class GHSyncSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				})
         	.inputEl.addClass('my-plugin-setting-text'));
+
+		new Setting(containerEl)
+			.setName('Check GitHub connection')
+			.setDesc('Step 2 of setup: verify the repository address and read access without changing notes. This does not test write permission.')
+			.addButton(button => button
+				.setButtonText('Test connection')
+				.onClick(async () => {
+					button.setDisabled(true);
+					try { await this.plugin.diagnoseConnection(); }
+					finally { button.setDisabled(false); }
+				}));
+		new Setting(containerEl)
+			.setName('Last successful sync')
+			.setDesc(this.plugin.settings.lastSuccessfulSync
+				? new Date(this.plugin.settings.lastSuccessfulSync).toLocaleString()
+				: 'No successful synchronization recorded yet.');
 
 		if (Platform.isMobile) {
 			new Setting(containerEl)
