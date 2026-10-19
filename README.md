@@ -1,3 +1,12 @@
+### Changelog 1.1.0-beta.1 (fork: SrKain)
+- Experimental Android and iOS support using isomorphic-git and Obsidian Vault adapters.
+- Mobile GitHub HTTPS authentication via Obsidian SecretStorage.
+- Initial clone collision protection and serialized synchronization.
+- Mobile compilation and filesystem smoke tests in GitHub Actions.
+- [Read the mobile setup guide and safety limitations](docs/MOBILE.md).
+
+> **Beta notice:** Tested through automated compilation and simulated mobile filesystem operations, **not yet verified on real Android/iOS devices**. Back up your vault before testing.
+
 ### Changelog 1.0.7
 - Simplified the sync success notice so successful runs show a shorter confirmation message.
 
