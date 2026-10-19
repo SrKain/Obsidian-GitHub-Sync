@@ -88,7 +88,7 @@ const vault = {
       message: 'first revision' });
     await mobileFs.flush();
     const log = await git.log({ fs: mobileFs, dir: '/', depth: 1 });
-    assert.equal(log[0].commit.message, 'first revision');
+    assert.equal(log[0].commit.message.trim(), 'first revision');
     assert.equal(await mobileFs.promises.readFile('/notes.md', 'utf8'), 'First revision');
 
     await mobileFs.promises.writeFile('/notes.md', 'Second revision');
