@@ -116,6 +116,10 @@ export default class GHSyncPlugin extends Plugin {
       this.showNotice('GitHub repository is reachable. Write permissions will be verified on the first push.', 'INFO', 7000);
       return true;
     } catch (error) {
+      console.error('[GitHub Sync]', error);
+      this.settings.lastSyncError = captureSyncError(error);
+      try { await this.saveSettings(); }
+      catch (saveError) { console.error('[GitHub Sync] Could not save error diagnostics', saveError); }
       this.showNotice(publicErrorMessage(error), 'ERROR', 10000);
       return false;
     }
