@@ -60,4 +60,20 @@ This version cannot merge independently created vault histories.
 - [ ] Private repository with a read/write fine-grained token
 - [ ] Verify desktop functionality remains unchanged
 
+## Diagnosing a failed sync on Android or iOS
+
+If **Sync with Remote** still fails, open **GitHub Sync → Settings → Last sync error**
+and select **Copy**. The report stores a timestamp, sanitized error name,
+short redacted message and up to five safe function/file/line frames. It never
+includes the raw stack, token, URL or absolute file path. A successful sync
+clears the prior report. The console still records the original error where
+developer tools are available.
+
+The mobile bundle includes its own browser `Buffer` implementation and does
+not require Node's `buffer` module. A Node-only test is not sufficient to
+validate the Obsidian WebView: install the updated build on the real device
+and try **Test GitHub connection**, followed by **Sync with Remote**.
+If the vault previously entered `pending`, do not delete `.git`; retry the
+sync with the updated build.
+
 The GitHub Actions compilation is not a substitute for on-device integration testing.
