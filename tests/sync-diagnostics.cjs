@@ -15,7 +15,7 @@ const esbuild = require('esbuild');
     });
     const {captureSyncError,formatLastSyncError}=require(compiled);
     const error=new Error('Request to https://user:password@github.com/owner/private?token=secret failed; '+
-      'Bearer abc123 ghp_sensitive github_pat_private token=unmasked access_token=secret');
+      'Bearer abc123 ghp_sensitive github_pat_private token=unmasked access_token=secret file:///private/secrets/main.js');
     error.name='TypeError';
     error.stack='TypeError: secret\n'+[
       '    at StreamReader (/home/user/workspace/node_modules/isomorphic-git/main.js:21:44)',
@@ -32,7 +32,7 @@ const esbuild = require('esbuild');
     assert.match(report,/StreamReader \(main.js:21\)/);
     assert.match(report,/MobileSync.sync \(main.js:145\)/);
     for (const secret of ['https://','github.com','ghp_sensitive','github_pat_private',
-      'Bearer abc123','token=unmasked','access_token=secret','/home/','/data/','/srv/','/private/','sixth']) {
+      'Bearer abc123','token=unmasked','access_token=secret','file:///','/home/','/data/','/srv/','/private/','sixth']) {
       assert(!report.includes(secret), 'must not leak '+secret);
     }
     assert(captured.message.length<=300);
