@@ -9,7 +9,7 @@ export interface LastSyncError {
 const safeErrorName = /^[A-Za-z]{3,40}$/;
 const secretPattern = /\b(?:Bearer\s+\S+|github_pat_\w+|gh[pousr]_\w+)\b/gi;
 const keyPattern = /\b(token|access_token|password|authorization|api[_-]?key|secret)\s*[:=]\s*['"]?[^\s&'",;]+/gi;
-const urlPattern = /(?:https?:\/\/|ssh:\/\/|git@)\S+/gi;
+const urlPattern = /(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/|git@)\S+/gi;
 
 function redact(raw: string): string {
   return raw.replace(urlPattern, '[URL]')
