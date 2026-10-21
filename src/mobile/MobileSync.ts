@@ -1,5 +1,5 @@
 import { App, requestUrl } from 'obsidian';
-import { PLUGIN_SETTINGS_PATH, classifySyncError, retryRead, sameRemote, SyncConflictError, validateRemote } from '../core/SyncSafety';
+import { PLUGIN_SETTINGS_PATH, classifySyncError, retryRead, sameRemote, RemoteMainMissingError, SyncConflictError, validateRemote } from '../core/SyncSafety';
 import { VaultGitFS } from './VaultGitFS';
 
 /**
@@ -82,6 +82,26 @@ export class MobileSync {
     return import('isomorphic-git');
   }
 
+  /** Inspect advertised branches without changing local refs or files. */
+  private async remoteHeads(): Promise<Record<string, string>> {
+    const git = await this.git();
+    const info = await retryRead(() => git.getRemoteInfo({
+      http: this.http as any, url: this.remote, onAuth: this.onAuth,
+    }));
+    return info.refs?.heads ?? {};
+  }
+
+  /** An unborn main has a HEAD symref but no resolvable branch commit. */
+  private async hasLocalMain(git: any): Promise<boolean> {
+    try {
+      await git.resolveRef({ fs: this.fsClient, dir: this.dir, ref: 'refs/heads/main' });
+      return true;
+    } catch (error) {
+      if ((error as { name?: string })?.name === 'NotFoundError') return false;
+      throw error;
+    }
+  }
+
   private async prepare() {
     const git = await this.git();
     const remote = this.remote;
@@ -93,43 +113,66 @@ export class MobileSync {
       if (existing.length) {
         throw new Error('This vault already contains notes. To prevent data loss, connect an empty mobile vault or import a vault containing its .git history.');
       }
-      // Never checkout before checking for file collisions (especially .obsidian).
-      await git.clone({
-        fs: this.fsClient, http: this.http as any, dir: this.dir,
-        url: remote, ref: 'main', singleBranch: true, noCheckout: true,
-        onAuth: this.onAuth,
-      });
-      await adapter.write(this.bootstrapMarker, 'pending');
+      const heads = await this.remoteHeads();
+      if (!('main' in heads)) {
+        if (Object.keys(heads).length) throw new RemoteMainMissingError();
+        // Empty remote: initialize an unborn main instead of cloning an absent ref.
+        await git.init({ fs: this.fsClient, dir: this.dir, defaultBranch: 'main' });
+        await git.addRemote({ fs: this.fsClient, dir: this.dir, remote: 'origin', url: remote });
+      } else {
+        // Never checkout before checking for file collisions (especially .obsidian).
+        await git.clone({
+          fs: this.fsClient, http: this.http as any, dir: this.dir,
+          url: remote, ref: 'main', singleBranch: true, noCheckout: true,
+          onAuth: this.onAuth,
+        });
+        await adapter.write(this.bootstrapMarker, 'pending');
+      }
     }
 
     if (await adapter.exists(this.bootstrapMarker)) {
-      const paths = await git.listFiles({ fs: this.fsClient, dir: this.dir, ref: 'main' });
-      if (paths.includes(PLUGIN_SETTINGS_PATH)) {
-        throw new Error('The GitHub repository contains plugin data.json, which may expose credentials. Remove this file from Git history before continuing.');
+      const heads = await this.remoteHeads();
+      if (!('main' in heads)) {
+        if (Object.keys(heads).length) throw new RemoteMainMissingError();
+        // Recover clones of an empty remote, without deleting .git or vault files.
+        const head = (await adapter.read('.git/HEAD')).trim();
+        if (head !== 'ref: refs/heads/main') {
+          throw new Error('Mobile bootstrap HEAD is not on main. Inspect Git history on desktop before syncing.');
+        }
+        await adapter.remove(this.bootstrapMarker);
+      } else {
+        const paths = await git.listFiles({ fs: this.fsClient, dir: this.dir, ref: 'main' });
+        if (paths.includes(PLUGIN_SETTINGS_PATH)) {
+          throw new Error('The GitHub repository contains plugin data.json, which may expose credentials. Remove this file from Git history before continuing.');
+        }
+        const collisions: string[] = [];
+        for (const path of paths) if (await adapter.exists(path)) collisions.push(path);
+        if (collisions.length) {
+          throw new Error('Mobile setup paused: existing files would be overwritten (' +
+            collisions.slice(0, 5).join(', ') + '). Move or back up conflicting files before retrying.');
+        }
+        await git.checkout({
+          fs: this.fsClient, dir: this.dir, ref: 'main',
+          filepaths: paths, noUpdateHead: true, force: false,
+          nonBlocking: true, batchSize: 30,
+        });
+        await adapter.remove(this.bootstrapMarker);
       }
-      const collisions: string[] = [];
-      for (const path of paths) if (await adapter.exists(path)) collisions.push(path);
-      if (collisions.length) {
-        throw new Error('Mobile setup paused: existing files would be overwritten (' +
-          collisions.slice(0, 5).join(', ') + '). Move or back up conflicting files before retrying.');
-      }
-      await git.checkout({
-        fs: this.fsClient, dir: this.dir, ref: 'main',
-        filepaths: paths, noUpdateHead: true, force: false,
-        nonBlocking: true, batchSize: 30,
-      });
-      await adapter.remove(this.bootstrapMarker);
     }
 
     // Refuse to upload a tracked settings file, including repositories that
     // were initialized before this plugin version.
-    const trackedFiles = await git.listFiles({ fs: this.fsClient, dir: this.dir });
+    const trackedFiles = await this.hasLocalMain(git)
+      ? await git.listFiles({ fs: this.fsClient, dir: this.dir })
+      : [];
     if (trackedFiles.includes(PLUGIN_SETTINGS_PATH)) {
       throw new Error('Git is tracking plugin data.json. Untrack it on desktop and rotate any exposed token before syncing.');
     }
-    const branch = await git.currentBranch({ fs: this.fsClient, dir: this.dir });
-    if (branch !== 'main') {
-      throw new Error('Mobile sync currently supports only the main branch. Current branch: ' + branch);
+    // Checking the HEAD symref also handles unborn main, for which
+    // currentBranch can return undefined or throw in some isomorphic-git builds.
+    const head = (await adapter.read('.git/HEAD')).trim();
+    if (head !== 'ref: refs/heads/main') {
+      throw new Error('Mobile sync currently supports only the main branch.');
     }
 
     const remotes = await git.listRemotes({ fs: this.fsClient, dir: this.dir });
@@ -155,11 +198,13 @@ export class MobileSync {
     try {
       if (!await this.app.vault.adapter.exists('.git')) return false;
       if (await this.app.vault.adapter.exists(this.bootstrapMarker)) return false;
+      if (!('main' in await this.remoteHeads())) return false;
       const git = await this.prepare();
       await retryRead(() => git.fetch({
         fs: this.fsClient, http: this.http as any, dir: this.dir,
         remote: 'origin', ref: 'main', singleBranch: true, onAuth: this.onAuth,
       }));
+      if (!await this.hasLocalMain(git)) return true;
       const local = await git.resolveRef({ fs: this.fsClient, dir: this.dir, ref: 'refs/heads/main' });
       const remote = await git.resolveRef({ fs: this.fsClient, dir: this.dir, ref: 'refs/remotes/origin/main' });
       if (local === remote) return false;
@@ -193,33 +238,56 @@ export class MobileSync {
           message: 'Obsidian mobile ' + new Date().toISOString(),
         });
       }
-      await retryRead(() => git.fetch({
-        fs, http: this.http as any, dir, remote: 'origin',
-        ref: 'main', singleBranch: true, onAuth: this.onAuth,
-      }));
-      const local = await git.resolveRef({ fs, dir, ref: 'refs/heads/main' });
-      const remote = await git.resolveRef({ fs, dir, ref: 'refs/remotes/origin/main' });
-      if (local !== remote) {
-        try {
-          await git.pull({
-            fs, http: this.http as any, dir, remote: 'origin', ref: 'main',
-            author, committer: author, onAuth: this.onAuth,
-          });
-        } catch (error) {
-          const data = (error as { data?: { filepaths?: string[] } })?.data;
-          const files = Array.isArray(data?.filepaths) ? data.filepaths : [];
-          if (files.length || classifySyncError(error) === 'conflict') {
-            throw new SyncConflictError(files);
+      const heads = await this.remoteHeads();
+      const remoteHasMain = 'main' in heads;
+      if (!remoteHasMain && Object.keys(heads).length) throw new RemoteMainMissingError();
+      if (remoteHasMain) {
+        await retryRead(() => git.fetch({
+          fs, http: this.http as any, dir, remote: 'origin',
+          ref: 'main', singleBranch: true, onAuth: this.onAuth,
+        }));
+        const local = await git.resolveRef({ fs, dir, ref: 'refs/heads/main' });
+        const remote = await git.resolveRef({ fs, dir, ref: 'refs/remotes/origin/main' });
+        if (local !== remote) {
+          try {
+            await git.pull({
+              fs, http: this.http as any, dir, remote: 'origin', ref: 'main',
+              author, committer: author, onAuth: this.onAuth,
+            });
+          } catch (error) {
+            const data = (error as { data?: { filepaths?: string[] } })?.data;
+            const files = Array.isArray(data?.filepaths) ? data.filepaths : [];
+            if (files.length || classifySyncError(error) === 'conflict') {
+              throw new SyncConflictError(files);
+            }
+            // Propagate errors for classification, never put raw Git text in notices.
+            throw error;
           }
-          // Propagate the original error for classification by the UI.
-          // Do not include raw HTTP headers, tokens, or URLs in notices.
-          throw error;
         }
       }
-      await git.push({
-        fs, http: this.http as any, dir, remote: 'origin', ref: 'main',
-        onAuth: this.onAuth,
-      });
+      // An unborn local main cannot be pushed. Empty vault + empty remote is OK.
+      if (!await this.hasLocalMain(git)) return;
+      try {
+        const result = await git.push({
+          fs, http: this.http as any, dir, remote: 'origin', ref: 'main',
+          onAuth: this.onAuth,
+        });
+        if (!result.ok) {
+          const errors = [result.error, ...Object.values(result.refs ?? {}).map(
+            (ref: any) => ref.error
+          )].filter(Boolean).join(' ');
+          if (/non.fast.forward|fetch first|stale info/i.test(errors)) {
+            throw new SyncConflictError([]);
+          }
+          throw new Error('GitHub rejected the push. Check repository write permissions or branch protection.');
+        }
+      } catch (error) {
+        const detail = String(error instanceof Error ? error.message : error);
+        if (/non.fast.forward|fetch first|stale info/i.test(detail)) {
+          throw new SyncConflictError([]);
+        }
+        throw error;
+      }
     } finally {
       await this.fs.flush();
     }
