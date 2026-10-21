@@ -137,7 +137,23 @@ export class MobileSync {
         // Recover clones of an empty remote, without deleting .git or vault files.
         const head = (await adapter.read('.git/HEAD')).trim();
         if (head !== 'ref: refs/heads/main') {
-          throw new Error('Mobile bootstrap HEAD is not on main. Inspect Git history on desktop before syncing.');
+          // An older noCheckout clone of an empty remote can leave an unborn
+          // master symref despite ref:'main'. Only repair this when there is
+          // no HEAD commit; never re-point a branch containing history.
+          if (head !== 'ref: refs/heads/master') {
+            throw new Error('Mobile bootstrap HEAD is not on main. Inspect Git history on desktop before syncing.');
+          }
+          let unborn = false;
+          try {
+            await git.resolveRef({ fs: this.fsClient, dir: this.dir, ref: 'HEAD' });
+          } catch (error) {
+            if ((error as { name?: string })?.name !== 'NotFoundError') throw error;
+            unborn = true;
+          }
+          if (!unborn) {
+            throw new Error('Mobile bootstrap has local commits on master. Inspect Git history on desktop before syncing.');
+          }
+          await adapter.write('.git/HEAD', 'ref: refs/heads/main\n');
         }
         await adapter.remove(this.bootstrapMarker);
       } else {
