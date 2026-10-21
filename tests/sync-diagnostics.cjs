@@ -17,14 +17,14 @@ const esbuild = require('esbuild');
     const error=new Error('Request to https://user:password@github.com/owner/private?token=secret failed; '+
       'Bearer abc123 ghp_sensitive github_pat_private token=unmasked access_token=secret');
     error.name='TypeError';
-    error.stack='TypeError: secret\\n'+[
+    error.stack='TypeError: secret\n'+[
       '    at StreamReader (/home/user/workspace/node_modules/isomorphic-git/main.js:21:44)',
       '    at MobileSync.sync (file:///data/user/0/obsidian/plugins/main.js:145:22)',
       '    at unsafeName (https://host.example.com/path/main.js:5:77)',
       '    at another (/private/path/git.js:73:9)',
       '    at git (/srv/project/app.js:99:2)',
       '    at sixth (/srv/project/other.js:500:2)'
-    ].join('\\n');
+    ].join('\n');
     const captured=captureSyncError(error);
     const report=formatLastSyncError(captured);
     assert.equal(captured.name,'TypeError');
