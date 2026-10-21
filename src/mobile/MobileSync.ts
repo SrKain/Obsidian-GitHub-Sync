@@ -1,3 +1,8 @@
+import { Buffer } from 'buffer';
+// The isomorphic-git runtime and sha.js also rely on a global Buffer.
+// MobileSync is lazy-loaded on mobile; do not replace an existing implementation.
+if (!(globalThis as any).Buffer) (globalThis as any).Buffer = Buffer;
+
 import { App, requestUrl } from 'obsidian';
 import { PLUGIN_SETTINGS_PATH, classifySyncError, retryRead, sameRemote, RemoteMainMissingError, SyncConflictError, validateRemote } from '../core/SyncSafety';
 import { VaultGitFS } from './VaultGitFS';

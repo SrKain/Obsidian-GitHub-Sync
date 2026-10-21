@@ -22,6 +22,13 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Compile and bundle plugin
         run: npm run build
+      - name: Reject external Node buffer in mobile bundle
+        run: |
+          if grep -Fq 'require("buffer")' main.js; then
+            echo 'Mobile bundle still requires Node buffer' >&2
+            exit 1
+          fi
+          wc -c main.js
       - name: Validate shared sync safety rules
         run: node tests/sync-safety.cjs
       - name: Desktop real Git regression test
@@ -32,6 +39,10 @@ jobs:
         run: node tests/mobile-e2e.cjs
       - name: Empty remote and stuck bootstrap recovery
         run: node tests/mobile-empty-remote.cjs
+      - name: WebView emulation without Node Buffer or process
+        run: node tests/mobile-webview-emulation.cjs
+      - name: Validate sanitized mobile error diagnostics
+        run: node tests/sync-diagnostics.cjs
       - name: Publish beta plugin files
         uses: actions/upload-artifact@v4
         with:

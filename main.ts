@@ -2,6 +2,7 @@ import { App, Notice, Platform, Plugin, PluginSettingTab, SecretComponent, Setti
 import type { SimpleGitOptions } from 'simple-git';
 import type { MobileSync } from './src/mobile/MobileSync';
 import { classifySyncError, publicErrorMessage, retryRead, SyncConflictError, validateRemote } from './src/core/SyncSafety';
+import { captureSyncError, formatLastSyncError, type LastSyncError } from './src/core/SyncDiagnostics';
 
 type NoticeLevelSetting = 'ALL' | 'WARNING' | 'ERROR';
 type LegacyNoticeLevelSetting = NoticeLevelSetting | 'WARNINGS';
@@ -20,6 +21,7 @@ interface GHSyncSettings {
 	mobileAuthorName: string;
 	mobileAuthorEmail: string;
 	lastSuccessfulSync: string;
+	lastSyncError: LastSyncError | null;
 }
 
 const DEFAULT_SETTINGS: GHSyncSettings = {
@@ -34,6 +36,7 @@ const DEFAULT_SETTINGS: GHSyncSettings = {
 	mobileAuthorName: 'Obsidian Mobile',
 	mobileAuthorEmail: 'obsidian-mobile@users.noreply.github.com',
 	lastSuccessfulSync: '',
+	lastSyncError: null,
 }
 
 
@@ -113,6 +116,10 @@ export default class GHSyncPlugin extends Plugin {
       this.showNotice('GitHub repository is reachable. Write permissions will be verified on the first push.', 'INFO', 7000);
       return true;
     } catch (error) {
+      console.error('[GitHub Sync]', error);
+      this.settings.lastSyncError = captureSyncError(error);
+      try { await this.saveSettings(); }
+      catch (saveError) { console.error('[GitHub Sync] Could not save error diagnostics', saveError); }
       this.showNotice(publicErrorMessage(error), 'ERROR', 10000);
       return false;
     }
@@ -134,10 +141,14 @@ export default class GHSyncPlugin extends Plugin {
       if (Platform.isMobile) await (await this.mobileEngine()).sync();
       else await this.syncDesktop();
       this.settings.lastSuccessfulSync = new Date().toISOString();
+      this.settings.lastSyncError = null;
       await this.saveSettings();
       this.showSyncSuccessNotice();
     } catch (error) {
       console.error('[GitHub Sync]', error);
+      this.settings.lastSyncError = captureSyncError(error);
+      try { await this.saveSettings(); }
+      catch (saveError) { console.error('[GitHub Sync] Could not save error diagnostics', saveError); }
       this.showNotice(publicErrorMessage(error), 'ERROR', 10000);
       if (classifySyncError(error) === 'conflict') {
         const { ConflictRecoveryModal } = await import('./src/ui/ConflictRecoveryModal');
@@ -170,6 +181,9 @@ export default class GHSyncPlugin extends Plugin {
       }
     } catch (error) {
       console.error('[GitHub Sync]', error);
+      this.settings.lastSyncError = captureSyncError(error);
+      try { await this.saveSettings(); }
+      catch (saveError) { console.error('[GitHub Sync] Could not save error diagnostics', saveError); }
       this.showNotice(publicErrorMessage(error), 'WARNING', 10000);
     }
   }
@@ -297,6 +311,28 @@ class GHSyncSettingTab extends PluginSettingTab {
 				: 'No successful synchronization recorded yet.');
 
 		if (Platform.isMobile) {
+            const report = formatLastSyncError(this.plugin.settings.lastSyncError);
+            const desc = document.createDocumentFragment();
+            const text = document.createElement('pre');
+            text.textContent = report || 'No sync error recorded.';
+            text.style.whiteSpace = 'pre-wrap';
+            text.style.overflowWrap = 'anywhere';
+            desc.appendChild(text);
+            new Setting(containerEl)
+                .setName('Last sync error')
+                .setDesc(desc)
+                .addButton(button => button
+                    .setButtonText('Copy')
+                    .setDisabled(!report)
+                    .onClick(async () => {
+                        try {
+                            await navigator.clipboard.writeText(report);
+                            new Notice('Sync diagnostics copied.');
+                        } catch (error) {
+                            console.error('[GitHub Sync] Could not copy diagnostics', error);
+                            new Notice('Could not copy diagnostics. Check clipboard permissions.');
+                        }
+                    }));
 			new Setting(containerEl)
 				.setName('GitHub token')
 				.setDesc('Choose a secret containing a fine-grained GitHub token with Contents read/write access. The token stays in local SecretStorage.')
