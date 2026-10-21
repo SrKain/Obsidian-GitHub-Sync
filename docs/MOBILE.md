@@ -4,7 +4,7 @@ Mobile support starts with plugin **1.1.0-beta.1** and Obsidian **1.11.4+**.
 The plugin uses `isomorphic-git` on mobile and retains native Git (`simple-git`) on desktop.
 
 ## Prerequisites
-- Your notes are already in a GitHub repository whose active branch is **main**.
+- Use a GitHub repository with a **main** branch, or a brand-new repository with no commits or branches. Repositories containing only other branches (such as `master`) are not supported.
 - All other devices have completed their pending pushes.
 - On mobile, use an **HTTPS** GitHub repository URL (not SSH).
 - For private repositories create a **fine-grained GitHub personal access token**:
@@ -17,7 +17,7 @@ The plugin uses `isomorphic-git` on mobile and retains native Git (`simple-git`)
 2. In plugin settings, paste the remote HTTPS URL (`https://github.com/OWNER/NOTES.git`).
 3. Under **GitHub token**, create/select a secret in Obsidian SecretStorage, then choose it for the plugin. A public repository does not necessarily need a token for fetch, but push requires authentication.
 4. Set commit author name and email.
-5. Use the **Sync with Remote** command. The first sync fetches the repository without checking out files, checks for filenames that would overwrite existing local files, then checks out the remote notes.
+5. Use the **Sync with Remote** command. For an existing `main`, the first sync fetches without checking out files, checks for collisions and checks out remote notes. For a brand-new empty repository, it initializes a local unborn `main` without checking out anything. The first note you create and sync creates `main` on GitHub.
 6. Verify a small test note syncs from mobile to desktop and back.
 
 **Safety:** The plugin refuses initial checkout when an existing local file would be overwritten.
@@ -27,7 +27,7 @@ This version cannot merge independently created vault histories.
 
 ## How syncing works
 - Local changes are committed first (including additions and deletions).
-- Remote changes are fetched and merged into `main`.
+- Remote changes are fetched and merged into `main` when it exists. Empty remotes do not require fetch or pull.
 - Sync aborts on conflicts or network failures without executing push.
 - Outgoing commits are pushed to `main`, even if no additional files changed.
 - One sync operation runs at a time.
@@ -36,7 +36,7 @@ This version cannot merge independently created vault histories.
 
 ## Important limitations
 - **Beta:** Test with copies of your notes before relying on this for primary data.
-- **main only:** Other branches and Git submodules are not supported.
+- **main only:** Only `main` is synchronized; other branches and Git submodules are not supported. A remote that has only `master` requires creating or renaming `main` first.
 - **Mobile HTTPS only:** SSH transport is desktop-only.
 - Git history, images, attachments and large vaults can consume significant RAM on phones.
 - Simultaneous edits can create conflicts; solve these on desktop with a Git client, then retry the mobile sync.
