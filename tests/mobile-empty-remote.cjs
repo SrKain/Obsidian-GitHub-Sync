@@ -178,13 +178,14 @@ Module._load=function(id,parent,isMain){
       ref:'main',singleBranch:true,noCheckout:true,
     });
     git(stuckDir,'remote','set-url','origin','https://github.com/example/notes.git');
-    assert.equal(fs.readFileSync(path.join(stuckDir,'.git/HEAD'),'utf8').trim(),'ref: refs/heads/main');
+    assert.equal(fs.readFileSync(path.join(stuckDir,'.git/HEAD'),'utf8').trim(),'ref: refs/heads/master','legacy clone starts on unborn master');
     fs.writeFileSync(path.join(stuckDir,'.git/github-sync-bootstrap'),'pending');
     fs.writeFileSync(path.join(stuckDir,'kept.md'),'Keep this local note\\n');
     const stuck=createMobile(stuckDir);
     await stuck.sync();
     assert.equal(fs.existsSync(path.join(stuckDir,'.git')),true,'git metadata preserved');
     assert.equal(fs.existsSync(path.join(stuckDir,'.git/github-sync-bootstrap')),false,'pending marker removed');
+    assert.equal(fs.readFileSync(path.join(stuckDir,'.git/HEAD'),'utf8').trim(),'ref: refs/heads/main','unborn HEAD repaired');
     assert.equal(fs.readFileSync(path.join(stuckDir,'kept.md'),'utf8'),'Keep this local note\\n');
     assert.equal(run('--git-dir',bare,'show','main:kept.md'),'Keep this local note\\n');
 
