@@ -8,6 +8,14 @@ export class SyncConflictError extends Error {
   }
 }
 
+/** A remote with other branches but no main must not be implicitly retargeted. */
+export class RemoteMainMissingError extends Error {
+  constructor() {
+    super('Remote repository has no main branch.');
+    this.name = 'RemoteMainMissingError';
+  }
+}
+
 /**
  * Shared safety checks. These functions deliberately have no Obsidian, Git,
  * Electron, or filesystem dependencies so they work on phones and desktops.
@@ -67,7 +75,11 @@ export function publicErrorMessage(error: unknown): string {
   const kind = classifySyncError(error);
   const detail = String(error instanceof Error ? error.message : error).toLowerCase();
   // These are fixed guidance strings, never forwarded input from Git, GitHub,
-  // command-line output, or an untrusted URL.
+  // command-line output, or an untrusted URL. Only sanitized error names
+  // may be added to the unknown fallback.
+  if (error instanceof RemoteMainMissingError || detail.includes('remote repository has no main branch')) {
+    return 'The remote repository has no main branch. The plugin syncs only main; create or rename main on GitHub.';
+  }
   if (detail.includes('tracking plugin') || detail.includes('contains plugin data.json')) {
     return 'Your vault is tracking GitHub Sync data.json. Remove it from Git tracking and rotate previously exposed credentials.';
   }
@@ -98,7 +110,11 @@ export function publicErrorMessage(error: unknown): string {
     case 'network': return 'Network connection failed. Your notes remain local; retry after reconnecting.';
     case 'conflict': return 'These notes have conflicting changes. Sync is paused; resolve the conflicts before retrying.';
     case 'remote': return 'Repository not found. Check its address and whether the token can access it.';
-    default: return 'Sync could not finish. No automatic reset or force-push was performed. Check the plugin settings.';
+    default: {
+      const name = error instanceof Error && /^[A-Za-z]{3,40}$/.test(error.name)
+        ? ' (' + error.name + ')' : '';
+      return 'Sync could not finish. No automatic reset or force-push was performed. Check the plugin settings.' + name;
+    }
   }
 }
 

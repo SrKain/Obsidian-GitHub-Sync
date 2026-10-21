@@ -137,6 +137,7 @@ export default class GHSyncPlugin extends Plugin {
       await this.saveSettings();
       this.showSyncSuccessNotice();
     } catch (error) {
+      console.error('[GitHub Sync]', error);
       this.showNotice(publicErrorMessage(error), 'ERROR', 10000);
       if (classifySyncError(error) === 'conflict') {
         const { ConflictRecoveryModal } = await import('./src/ui/ConflictRecoveryModal');
@@ -168,6 +169,7 @@ export default class GHSyncPlugin extends Plugin {
         }
       }
     } catch (error) {
+      console.error('[GitHub Sync]', error);
       this.showNotice(publicErrorMessage(error), 'WARNING', 10000);
     }
   }

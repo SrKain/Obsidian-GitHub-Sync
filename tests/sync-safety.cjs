@@ -34,6 +34,18 @@ const esbuild = require('esbuild');
     assert.equal(classifySyncError(conflict), 'conflict');
     assert.deepEqual(conflict.files, ['note.md']);
 
+    const missingMain = new (require(compiled).RemoteMainMissingError)();
+    assert.match(publicErrorMessage(missingMain), /remote repository has no main branch/i);
+    const unknown = new Error('Could not find https://github.com/private/repo?token=github_pat_sensitive');
+    unknown.name = 'NotFoundError';
+    assert.equal(classifySyncError(unknown), 'unknown');
+    const safe = publicErrorMessage(unknown);
+    assert.match(safe, /NotFoundError/);
+    assert(!safe.includes('Could not find') && !safe.includes('github_pat_') && !safe.includes('https://'));
+    const unsafeName = new Error('github_pat_secret');
+    unsafeName.name = 'HttpError token=github_pat_secret';
+    assert(!publicErrorMessage(unsafeName).includes('token='));
+
     const leaked = publicErrorMessage(new Error('unknown: github_pat_dont_echo_private_123'));
     assert(!leaked.includes('github_pat_'), 'never forward unsafe raw error data');
 

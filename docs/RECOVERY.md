@@ -59,6 +59,11 @@ a previously public repository. Do not distribute personal notes publicly.
 | Wrong origin | Check both remote addresses; plugin does not silently redirect |
 | Git merge conflicts | Resolve files without deleting Git metadata or forcing remote changes |
 | Missing Git history in populated vault | Connect a new vault or import existing history first |
+| Empty new remote / remote without `main` | An empty new remote is supported from an empty mobile vault; a remote with only other branches must have `main` created or renamed on GitHub |
+
+An older mobile bootstrap that is stuck with `.git/github-sync-bootstrap` set to
+`pending` against an empty remote is recovered automatically on the next sync.
+The existing `.git` directory and local notes are preserved.
 
 Automatic sync operates only while Obsidian is running. Device shutdown or
 background suspension may interrupt it, particularly on Android and iOS.
