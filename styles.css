@@ -69,3 +69,68 @@ If your plugin does not need CSS, delete this file.
   border-radius: var(--radius-m);
   line-height: 1.5;
 }
+
+
+/* Desktop conflict resolution: side-by-side previews, editable result. */
+.github-sync-conflicts {
+  width: min(1100px, 95vw);
+  max-width: 95vw;
+}
+
+.github-sync-conflicts .modal-content {
+  max-height: min(88vh, 1000px);
+  overflow-y: auto;
+}
+
+.github-sync-conflict-versions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--size-4-3);
+}
+
+.github-sync-conflict-version {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-top: var(--size-4-3);
+  gap: var(--size-4-2);
+}
+
+.github-sync-conflict-version label {
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+}
+
+.github-sync-conflict-text {
+  width: 100%;
+  min-height: 180px;
+  max-height: 340px;
+  resize: vertical;
+  box-sizing: border-box;
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  white-space: pre;
+  overflow: auto;
+}
+
+.github-sync-conflict-text[readonly] {
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+}
+
+.github-sync-conflict-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.github-sync-conflicts .setting-item {
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+}
+
+@media (max-width: 680px) {
+  .github-sync-conflict-versions {
+    grid-template-columns: 1fr;
+  }
+}
