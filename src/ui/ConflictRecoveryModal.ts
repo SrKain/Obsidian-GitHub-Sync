@@ -32,9 +32,7 @@ export class ConflictRecoveryModal extends Modal {
 
   private createTextArea(parent: HTMLElement, label: string, text: string, readOnly: boolean): HTMLTextAreaElement {
     const wrapper = parent.createDiv({ cls: 'github-sync-conflict-version' });
-    wrapper.createEl('label', { text });
-    // Replace label content with a descriptive heading, not note contents.
-    wrapper.querySelector('label')?.setText(label);
+    wrapper.createEl('label', { text: label });
     const field = wrapper.createEl('textarea', { cls: 'github-sync-conflict-text' });
     field.value = text;
     field.readOnly = readOnly;
