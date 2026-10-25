@@ -40,6 +40,31 @@ If there are merge conflicts, the plugin opens the affected files and stops the 
 
 The plugin also pushes existing local commits when the working tree is clean. If a sync is already running, a second request is skipped to avoid overlapping Git operations.
 
+## Resolve conflicts inside Obsidian (desktop beta)
+
+When a sync encounters conflicting Markdown edits, **GitHub Sync opens a
+side-by-side resolver** on desktop. You can also open **Resolve GitHub Sync
+conflicts** from the command palette.
+
+1. Inspect the **Local version** and **GitHub version** for each `.md` file.
+2. Select **Use local**, **Use GitHub**, or edit the **Final note** to preserve
+   content from both versions. The editable result initially includes the
+   working-tree text, which may contain Git conflict markers.
+3. Select **Apply to this note**. The plugin first saves a JSON backup under
+   the local vault's `.git/github-sync-backups/`, writes the selected content,
+   and stages only that resolved path. It does **not** push automatically.
+4. Repeat for every conflicted note, then select **Finish and sync**. The plugin
+   resumes the merge and pushes only if there are no remaining conflicts.
+
+**Safety and limitations:** Resolve from one device at a time. If a note changes
+while the dialog is open, applying is rejected and you must reopen the resolver.
+The visual workflow supports two-sided text conflicts in Markdown files up to
+200,000 characters per version. Binary attachments, deletion conflicts,
+non-Markdown files, and mobile merge completion still need a desktop Git client.
+The mobile beta continues to show non-destructive guidance. Do not manually
+remove Git conflict markers and assume that the merge is complete; Git's index
+must also be resolved. Always test with a backup vault before upgrading.
+
 ## Setup
 
 ### Setting up a GitHub repo
