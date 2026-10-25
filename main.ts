@@ -130,6 +130,33 @@ export default class GHSyncPlugin extends Plugin {
     new SetupWizard(this.app, this).open();
   }
 
+  /** Open the resolver directly from the command palette or after a merge conflict. */
+  async openConflictResolver(reportedFiles: string[] = []): Promise<void> {
+    const { ConflictRecoveryModal } = await import('./src/ui/ConflictRecoveryModal');
+    if (Platform.isMobile) {
+      new ConflictRecoveryModal(this.app, reportedFiles).open();
+      return;
+    }
+    const git = await this.desktopGit();
+    const unresolved = (await git.status()).conflicted;
+    const { readDesktopConflict, applyDesktopResolution } =
+      await import('./src/desktop/ConflictResolution');
+    new ConflictRecoveryModal(this.app, unresolved.length ? unresolved : reportedFiles, {
+      load: (path) => readDesktopConflict(git, this.app, path),
+      apply: (path, snapshot, resolved) =>
+        applyDesktopResolution(git, this.app, path, snapshot, resolved),
+      resume: async () => {
+        const pending = (await git.status()).conflicted;
+        if (pending.length) {
+          this.showNotice('Resolve all remaining Git conflicts before syncing.', 'WARNING');
+          await this.openConflictResolver(pending);
+          return;
+        }
+        await this.SyncNotes();
+      },
+    }).open();
+  }
+
   async SyncNotes(): Promise<void> {
     if (this.syncInProgress) {
       this.showNotice('GitHub Sync: synchronization is already running.', 'WARNING');
@@ -151,9 +178,12 @@ export default class GHSyncPlugin extends Plugin {
       catch (saveError) { console.error('[GitHub Sync] Could not save error diagnostics', saveError); }
       this.showNotice(publicErrorMessage(error), 'ERROR', 10000);
       if (classifySyncError(error) === 'conflict') {
-        const { ConflictRecoveryModal } = await import('./src/ui/ConflictRecoveryModal');
         const files = error instanceof SyncConflictError ? error.files : [];
-        new ConflictRecoveryModal(this.app, files).open();
+        try { await this.openConflictResolver(files); }
+        catch (resolverError) {
+          console.error('[GitHub Sync] Could not open the conflict resolver', resolverError);
+          this.showNotice('Could not open the conflict resolver. No force-push was attempted.', 'ERROR');
+        }
       }
     } finally {
       this.syncInProgress = false;
@@ -210,6 +240,16 @@ export default class GHSyncPlugin extends Plugin {
 			id: 'github-sync-diagnose',
 			name: 'Test GitHub connection',
 			callback: () => { void this.diagnoseConnection(); }
+		});
+		this.addCommand({
+			id: 'github-sync-resolve-conflicts',
+			name: 'Resolve GitHub Sync conflicts',
+			callback: () => {
+				void this.openConflictResolver().catch(error => {
+					console.error('[GitHub Sync] Could not open the conflict resolver', error);
+					this.showNotice('Conflict resolver is unavailable. Check the local Git repository.', 'ERROR');
+				});
+			}
 		});
 
 		// This adds a settings tab so the user can configure various aspects of the plugin
